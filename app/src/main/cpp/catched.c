@@ -58,6 +58,11 @@ static jboolean native_detectSystemProperties(JNIEnv *env, jclass clazz) {
 }
 
 // --- Xposed/LSPosed 检测 (Native 层) ---
+static jboolean native_detectSuspiciousExecutableMaps(JNIEnv *env, jclass clazz) {
+    (void)env; (void)clazz;
+    return sg_detect_suspicious_executable_maps() ? JNI_TRUE : JNI_FALSE;
+}
+
 static jboolean native_detectXposedMaps(JNIEnv *env, jclass clazz) {
     (void)env; (void)clazz;
     return detect_xposed_maps() > 0 ? JNI_TRUE : JNI_FALSE;
@@ -174,6 +179,7 @@ static JNINativeMethod methods[] = {
     {"nDetectSystemProperties",  "()Z",                                  (void *)native_detectSystemProperties},
 
     // Xposed/LSPosed (Native)
+    {"nDetectSuspiciousExecutableMaps", "()Z",                                  (void *)native_detectSuspiciousExecutableMaps},
     {"nDetectXposedMaps",        "()Z",                                  (void *)native_detectXposedMaps},
     {"nDetectXposedLibart",      "()Z",                                  (void *)native_detectXposedLibart},
     {"nDetectXposedAppProcess",  "()Z",                                  (void *)native_detectXposedAppProcess},

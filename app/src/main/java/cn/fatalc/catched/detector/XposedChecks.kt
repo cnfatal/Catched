@@ -17,14 +17,72 @@ private val xposedPackages = listOf(
 
 @Suppress("PrivateApi")
 fun xposedChecks(context: Context): List<Check> = listOf(
-    Check("xp.classloader", G, "ClassLoader 加载",
-        "通过系统 ClassLoader 尝试加载 de.robv.android.xposed.XposedBridge 类，加载成功说明 Xposed 框架已注入到当前运行时",
-        setOf("java", "classloader")
+    Check("xp.classloader", G, "ClassLoader 异常与多实例检测",
+        "不仅通过系统 ClassLoader，还通过 VMDebug 获取运行时所有 BaseDexClassLoader 实例，同时检查 ClassLoader 继承链中是否存在非 Android 官方自带的异常加载器，并在多实例中广泛搜寻风险类",
+        setOf("java", "classloader", "reflection")
     ) {
-        val d = runCatching {
-            ClassLoader.getSystemClassLoader().loadClass("de.robv.android.xposed.XposedBridge"); true
-        }.getOrDefault(false)
-        CheckResult(d, if (d) "XposedBridge class found in system classloader" else null)
+        val contextCl = context.classLoader
+        val foundClasses = mutableListOf<String>()
+        val suspiciousLoaders = mutableListOf<String>()
+
+        // 1. 检查类加载器链中是否有非自带的 ClassLoader
+        var currentCl: ClassLoader? = contextCl
+        while (currentCl != null) {
+            val clName = currentCl.javaClass.name
+            // 筛选出非官方包名的自定义 ClassLoader，正常基本都是 dalvik.system. 或 java.lang.
+            if (!clName.startsWith("dalvik.system.") && !clName.startsWith("java.") && !clName.startsWith("android.")) {
+                suspiciousLoaders.add("Chain: $clName")
+            }
+            currentCl = currentCl.parent
+        }
+
+        // 2. 覆盖多个 ClassLoader 搜寻风险类
+        val allLoaders = runCatching {
+            val vmDebug = Class.forName("dalvik.system.VMDebug")
+            val method = vmDebug.getDeclaredMethod(
+                "getInstancesOfClasses", Class.forName("[Ljava.lang.Class;"), Boolean::class.javaPrimitiveType
+            )
+            method.isAccessible = true
+            val bdcClass = Class.forName("dalvik.system.BaseDexClassLoader")
+            val classArray = java.lang.reflect.Array.newInstance(Class::class.java, 1)
+            java.lang.reflect.Array.set(classArray, 0, bdcClass)
+            @Suppress("UNCHECKED_CAST")
+            val instances = method.invoke(null, classArray, false) as? Array<Array<Any>>
+            instances?.firstOrNull()?.filterIsInstance<ClassLoader>()
+        }.getOrNull() ?: listOf(context.classLoader, ClassLoader.getSystemClassLoader())
+
+        // 移除固定的业务包名，仅保留框架核心注入特征，因为外挂包名可随机生成
+        val threats = listOf(
+            "de.robv.android.xposed.XposedBridge"
+        )
+
+        allLoaders.forEach { cl ->
+            val clName = cl.javaClass.name
+            // 记录非常规包名的外部类加载器实例
+            if (!clName.startsWith("dalvik.system.") && !clName.startsWith("java.") && !clName.startsWith("android.")) {
+                suspiciousLoaders.add("Instance: $clName")
+            }
+            if (clName.contains("xposed", true) || clName.contains("lsposed", true)) {
+                suspiciousLoaders.add("RiskName: $clName")
+            }
+
+            // 在所有获取到的 ClassLoader 中尝试加载风险类
+            threats.forEach { threat ->
+                if (runCatching { cl.loadClass(threat); true }.getOrDefault(false)) {
+                    foundClasses.add("$threat (in $clName)")
+                }
+            }
+        }
+
+        val res = mutableListOf<String>()
+        if (suspiciousLoaders.isNotEmpty()) {
+            res.add("Suspicious Loaders:\n" + suspiciousLoaders.distinct().joinToString("\n"))
+        }
+        if (foundClasses.isNotEmpty()) {
+            res.add("Found Classes:\n" + foundClasses.distinct().joinToString("\n"))
+        }
+
+        CheckResult(res.isNotEmpty(), res.joinToString("\n\n").ifEmpty { null })
     },
 
     Check("xp.vmdebug", G, "VMDebug 实例扫描",
@@ -48,8 +106,8 @@ fun xposedChecks(context: Context): List<Check> = listOf(
         CheckResult(d != null, d)
     },
 
-    Check("xp.dexpath", G, "DexPathList 扫描",
-        "反射读取当前 ClassLoader 的 BaseDexClassLoader.pathList.dexElements 数组，遍历所有已加载的 DEX 文件名，搜索包含 XposedBridge 或 lsposed 的条目",
+    Check("xp.dexpath", G, "DexPathList 路径扫描",
+        "反射读取当前 ClassLoader 的 BaseDexClassLoader.pathList.dexElements 数组，除搜寻特定框架外，主动发现任何外部注入的、非系统自带且非本应用的随机名 APK/JAR 模块",
         setOf("java", "reflection")
     ) {
         val evidence = runCatching {
@@ -59,10 +117,20 @@ fun xposedChecks(context: Context): List<Check> = listOf(
                 val pl = plf.get(cl)
                 val def = pl!!.javaClass.getDeclaredField("dexElements").apply { isAccessible = true }
                 val elements = def.get(pl) as? Array<*>
+                val myApk = context.applicationInfo.sourceDir
+                val myData = context.applicationInfo.dataDir ?: ""
                 val found = elements?.mapNotNull { e ->
                     val df = e?.javaClass?.getDeclaredField("dexFile")?.apply { isAccessible = true }?.get(e)
                     val fn = df?.javaClass?.getDeclaredMethod("getName")?.invoke(df) as? String
-                    if (fn?.contains("XposedBridge", true) == true || fn?.contains("lsposed", true) == true) fn else null
+                    if (fn != null) {
+                        val isSystem = fn.startsWith("/system/") || fn.startsWith("/apex/") || fn.startsWith("/vendor/")
+                        val isSelf = fn == myApk || (myData.isNotEmpty() && fn.startsWith(myData))
+                        if (!isSystem && !isSelf && (fn.endsWith(".apk") || fn.endsWith(".jar") || fn.endsWith(".dex"))) {
+                            "External Injected Module: $fn"
+                        } else if (fn.contains("XposedBridge", true) || fn.contains("lsposed", true)) {
+                            "Framework: $fn"
+                        } else null
+                    } else null
                 }
                 found?.joinToString("\n")?.ifEmpty { null }
             } else null
@@ -75,7 +143,8 @@ fun xposedChecks(context: Context): List<Check> = listOf(
         setOf("java", "stacktrace")
     ) {
         val frames = Thread.currentThread().stackTrace.filter {
-            it.className.contains("xposed", true) || it.className.contains("saurik") || it.className.contains("lsposed", true)
+            !it.className.startsWith(context.packageName) &&
+            (it.className.contains("xposed", true) || it.className.contains("saurik") || it.className.contains("lsposed", true))
         }
         CheckResult(
             frames.isNotEmpty(),
@@ -144,6 +213,13 @@ fun xposedChecks(context: Context): List<Check> = listOf(
         setOf("native", "svc", "procfs")
     ) {
         CheckResult(NativeBridge.nDetectXposedMaps())
+    },
+
+    Check("xp.anon_exe", G, "匿名执行段扫描",
+        "扫描 /proc/self/maps 识别非法的匿名可执行内存或伪造的 jit-cache 分段，此举可识别 Zygisk/Riru 内存隐藏技术",
+        setOf("native", "svc", "memory")
+    ) {
+        CheckResult(NativeBridge.nDetectSuspiciousExecutableMaps())
     },
 
     Check("xp.libart", G, "libart.so 扫描",

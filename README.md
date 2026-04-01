@@ -4,74 +4,24 @@ An Android security detection toolkit that identifies Root, Xposed, Frida, and L
 
 ## Features
 
-- **41 detection checks** across 4 categories
-- **SVC direct syscalls** bypass libc hooks for tamper-resistant detection
-- **Registration-based architecture** — each check is self-contained with metadata + execution logic
-- **Real-time UI** — results stream in per-check as scanning progresses
-- **Tag system** — checks are tagged by layer (`native`, `svc`, `java`, `reflection`, etc.) for filtering
+- **Broad Coverage**: Identifies Root, Magisk, Xposed, LSPosed, Frida, and Repackaging (NPatch/LSPatch) environments across 40+ granular checks.
+- **Syscall Level Analysis**: Utilizes inline assembly SVC (Supervisor Call) instructions to bypass standard libc wrappers, rendering detections resistant to GOT/PLT hooking and LD_PRELOAD techniques.
+- **Hybrid Inspection**: Combines Java-layer reflection, classloader analysis, and stack trace validation with native-layer memory, process, filesystem, and network stream scanning.
+- **Evidence Collection**: Captures precise indicators such as hooking stack traces, abnormal memory mappings, and modified application metadata.
 
-## Detection Groups
+## Detection Coverage
 
-### Root/Magisk (12 checks)
+### Root / Environment Integrity
+Identifies su binaries, Magisk-specific mount points, anomalous OverlayFS structures, Unix sockets, and altered SELinux contexts utilizing raw SVC access and property analysis.
 
-| ID | Check | Layer |
-|---|---|---|
-| `rt.su_svc` | SVC access to 14 su binary paths | native/svc |
-| `rt.pkg` | Known root manager package names | java/pm |
-| `rt.which` | `which su` shell execution | java/shell |
-| `rt.path` | PATH env traversal for su | java/filesystem |
-| `rt.stat` | SVC fstatat with SUID bit check | native/svc |
-| `rt.mount` | `/proc/mounts` magisk keyword scan | native/svc |
-| `rt.mountinfo` | `/proc/self/mountinfo` analysis | native/svc |
-| `rt.overlay` | OverlayFS workdir detection | java/shell |
-| `rt.selinux` | SELinux magisk_file label check | native/svc |
-| `rt.seprev` | `/proc/self/attr/prev` context | native/svc |
-| `rt.socket` | `/proc/net/unix` magisk socket scan | native/procfs |
-| `rt.prop` | System property anomaly check | java/property |
+### Xposed Framework
+Detects traditional Xposed and modern LSPosed implementations by analyzing BaseDexClassLoader instances, method caches, anomalous native method flags, and suspicious libart.so modifications.
 
-### Xposed/LSPosed (12 checks)
+### Frida
+Locates frida-agent and gadget injections through `/proc/self/maps` scanning, specific TCP port binding probes, D-Bus AUTH handshake verification, and memory feature scanning for anonymous mapped memory.
 
-| ID | Check | Layer |
-|---|---|---|
-| `xp.classloader` | XposedBridge class loading | java/classloader |
-| `xp.vmdebug` | VMDebug BaseDexClassLoader instance scan | java/reflection |
-| `xp.dexpath` | DexPathList.dexElements traversal | java/reflection |
-| `xp.stack` | Stack trace Xposed/Substrate pattern match | java/stacktrace |
-| `xp.pkg` | Xposed module metadata scan | java/pm |
-| `xp.cache` | XposedHelpers.methodCache inspection | java/reflection |
-| `xp.hooks` | sHookedMethodCallbacks field read | java/reflection |
-| `xp.native_flag` | Anomalous native method flag detection | java/reflection |
-| `xp.maps` | `/proc/self/maps` Xposed SO scan | native/svc |
-| `xp.libart` | libart.so xposed string search | native/svc |
-| `xp.app_process` | app_process.orig backup detection | native/svc |
-| `xp.artmethod` | ArtMethod struct size anomaly | native/memory |
-
-### Frida (8 checks)
-
-| ID | Check | Layer |
-|---|---|---|
-| `fr.maps` | `/proc/self/maps` frida-agent scan | native/svc |
-| `fr.port` | TCP connect to 27042/27043 | native/network |
-| `fr.tcp` | `/proc/net/tcp` port hex scan | native/svc |
-| `fr.server` | frida-server file existence | native/svc |
-| `fr.pipe` | `/proc/self/fd` named pipe scan | native/svc |
-| `fr.dbus` | D-Bus AUTH handshake probe | native/network |
-| `fr.mem` | Anonymous memory LIBFRIDA/frida:rpc scan | native/memory |
-| `fr.thread` | `/proc/self/task/*/comm` thread name scan | native/svc |
-
-### NPatch/LSPatch (9 checks)
-
-| ID | Check | Layer |
-|---|---|---|
-| `np.acf` | appComponentFactory tampering | java/reflection |
-| `np.stub` | LSPatch/NPatch stub class loading | java/classloader |
-| `np.so` | `/proc/self/maps` libnpatch SO scan | native/svc |
-| `np.openat` | openat GOT/PLT integrity check | native/hook |
-| `np.apk_path` | sourceDir cache path anomaly | java/filesystem |
-| `np.cache` | cache/npatch/ directory existence | native/svc |
-| `np.meta` | ApplicationInfo metadata key scan | java/reflection |
-| `np.profile` | Profile file read-only permission | native/svc |
-| `np.assets` | APK assets npatch directory scan | java/filesystem |
+### App Repackaging (NPatch/LSPatch)
+Uncovers modified ApplicationInfo metadata, injected AppComponentFactory entries, anomalous `cache/npatch/` filesystem structures, and the presence of `libnpatch` shared objects in the process space.
 
 ## Architecture
 

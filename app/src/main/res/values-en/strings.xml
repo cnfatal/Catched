@@ -1,0 +1,17 @@
+<resources>
+    <string name="app_name">Catched</string>
+    <string name="scan_re_scan">Re-Scan</string>
+    <string name="scan_in_progress">Performing comprehensive scan…</string>
+    
+    <string name="status_detected_count">%d Detected</string>
+    <string name="status_safe">Device Safe</string>
+    
+    <string name="check_status_detected">Detected</string>
+    <string name="check_status_passed">Passed</string>
+    <string name="check_status_waiting">Waiting for scan</string>
+    
+    <string name="label_expected">exp</string>
+    <string name="label_actual">act</string>
+    
+    <string name="stat_items">Items</string>
+</resources>

@@ -1,3 +1,17 @@
 <resources>
     <string name="app_name">Catched</string>
+    <string name="scan_re_scan">重新扫描</string>
+    <string name="scan_in_progress">正在执行全面检测…</string>
+    
+    <string name="status_detected_count">检出 %d 项</string>
+    <string name="status_safe">设备安全</string>
+    
+    <string name="check_status_detected">已检出</string>
+    <string name="check_status_passed">未检出</string>
+    <string name="check_status_waiting">等待扫描</string>
+    
+    <string name="label_expected">预期</string>
+    <string name="label_actual">实际</string>
+    
+    <string name="stat_items">检测项</string>
 </resources>

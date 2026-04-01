@@ -34,6 +34,15 @@ static const char *xposed_so_blacklist[] = {
     "liblsplant",
     "lspatch",
     "edxposed",
+    // 针对特定外挂样本 com.yes
+    "liblollllll.so",
+    "libnpdcc.so",
+    "libVirboxProtector.so",
+    "libVirboxProtectorvmp.so",
+    "libjar.so",
+    "liblib.so",
+    "libmyvmp.so",
+    "libstub.so",
 };
 static const int xposed_blacklist_count = sizeof(xposed_so_blacklist) / sizeof(xposed_so_blacklist[0]);
 

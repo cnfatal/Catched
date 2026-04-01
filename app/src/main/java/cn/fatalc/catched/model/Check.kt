@@ -6,10 +6,12 @@ data class Check(
     val name: String,
     val description: String,
     val tags: Set<String> = emptySet(),
+    val expected: String? = null,
     val run: () -> CheckResult
 )
 
 data class CheckResult(
     val detected: Boolean,
-    val evidence: String? = null
+    val evidence: String? = null,
+    val actual: String? = null
 )

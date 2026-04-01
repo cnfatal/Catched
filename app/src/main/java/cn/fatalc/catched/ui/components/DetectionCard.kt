@@ -16,6 +16,8 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.res.stringResource
+import cn.fatalc.catched.R
 import cn.fatalc.catched.model.Check
 import cn.fatalc.catched.model.CheckResult
 import cn.fatalc.catched.ui.theme.*
@@ -161,34 +163,46 @@ private fun CheckRow(check: Check, result: CheckResult?) {
             Text(check.id, style = MaterialTheme.typography.labelSmall, color = TextTertiary)
         }
 
-        // 证据行
-        if (result?.detected == true && result.evidence != null) {
-            Spacer(Modifier.height(4.dp))
-            Text(
-                result.evidence,
-                style = MaterialTheme.typography.bodySmall,
-                color = color.copy(alpha = 0.7f),
-                maxLines = 1,
-                modifier = Modifier.padding(start = 20.dp)
-            )
-        }
-
-        // tags 行
-        Spacer(Modifier.height(6.dp))
-        Row(modifier = Modifier.padding(start = 20.dp)) {
-            check.tags.take(3).forEach { tag ->
-                Surface(
-                    shape = RoundedCornerShape(4.dp),
-                    color = DarkSurfaceVariant,
-                    modifier = Modifier.padding(end = 4.dp)
-                ) {
+        // actual/evidence 行
+        if (result != null) {
+            val hasActualOrExpected = result.actual != null || check.expected != null
+            val hasEvidence = result.evidence != null
+            
+            if (hasActualOrExpected) {
+                if (check.expected != null) {
+                    Spacer(Modifier.height(4.dp))
                     Text(
-                        tag,
-                        style = MaterialTheme.typography.labelSmall,
-                        color = TextSecondary,
-                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                        "${stringResource(R.string.label_expected)}: ${check.expected.replace("\n", " ")}",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = SafeGreen.copy(alpha = 0.8f),
+                        maxLines = 1,
+                        overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+                        modifier = Modifier.padding(start = 20.dp)
                     )
                 }
+                if (result.actual != null) {
+                    Spacer(Modifier.height(4.dp))
+                    val actColor = if (result.detected) DangerRed.copy(alpha = 0.8f) else color.copy(alpha = 0.8f)
+                    Text(
+                        "${stringResource(R.string.label_actual)}: ${result.actual.replace("\n", " ")}",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = actColor,
+                        maxLines = 1,
+                        overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+                        modifier = Modifier.padding(start = 20.dp)
+                    )
+                }
+            }
+            if (hasEvidence) {
+                Spacer(Modifier.height(4.dp))
+                Text(
+                    result.evidence!!.replace("\n", " "),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = color.copy(alpha = 0.7f),
+                    maxLines = 1,
+                    overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+                    modifier = Modifier.padding(start = 20.dp)
+                )
             }
         }
     }
@@ -197,19 +211,43 @@ private fun CheckRow(check: Check, result: CheckResult?) {
         AlertDialog(
             onDismissRequest = { showDialog = false },
             title = {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Icon(
-                        when {
-                            result == null -> Icons.Default.HourglassEmpty
-                            result.detected -> Icons.Default.Warning
-                            else -> Icons.Default.CheckCircle
-                        },
-                        contentDescription = null, tint = color, modifier = Modifier.size(20.dp)
-                    )
-                    Spacer(Modifier.width(8.dp))
-                    Column {
-                        Text(check.name, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
-                        Text(check.id, style = MaterialTheme.typography.labelSmall, color = TextTertiary)
+                Column {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(
+                            when {
+                                result == null -> Icons.Default.HourglassEmpty
+                                result.detected -> Icons.Default.Warning
+                                else -> Icons.Default.CheckCircle
+                            },
+                            contentDescription = null, tint = color, modifier = Modifier.size(20.dp)
+                        )
+                        Spacer(Modifier.width(8.dp))
+                        Column {
+                            Text(check.name, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                            Text(check.id, style = MaterialTheme.typography.labelSmall, color = TextTertiary)
+                        }
+                    }
+                    if (check.tags.isNotEmpty()) {
+                        Spacer(Modifier.height(12.dp))
+                        @OptIn(ExperimentalLayoutApi::class)
+                        FlowRow(
+                            horizontalArrangement = Arrangement.spacedBy(4.dp),
+                            verticalArrangement = Arrangement.spacedBy(4.dp)
+                        ) {
+                            check.tags.forEach { tag ->
+                                Surface(
+                                    shape = RoundedCornerShape(4.dp),
+                                    color = DarkSurfaceVariant
+                                ) {
+                                    Text(
+                                        tag,
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = TextSecondary,
+                                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                                    )
+                                }
+                            }
+                        }
                     }
                 }
             },
@@ -219,12 +257,52 @@ private fun CheckRow(check: Check, result: CheckResult?) {
                     Spacer(Modifier.height(12.dp))
                     if (result != null) {
                         Text(
-                            if (result.detected) "已检出" else "未检出",
+                            if (result.detected) stringResource(R.string.check_status_detected) else stringResource(R.string.check_status_passed),
                             style = MaterialTheme.typography.bodyMedium,
                             fontWeight = FontWeight.SemiBold, color = color
                         )
-                        if (result.detected && result.evidence != null) {
+                        // expected / actual
+                        if (check.expected != null || result.actual != null) {
                             Spacer(Modifier.height(12.dp))
+                            Column(modifier = Modifier.fillMaxWidth()) {
+                                if (check.expected != null) {
+                                    Text(stringResource(R.string.label_expected),
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = TextSecondary)
+                                    Spacer(Modifier.height(4.dp))
+                                    Surface(
+                                        shape = RoundedCornerShape(6.dp),
+                                        color = DarkBackground,
+                                        modifier = Modifier.fillMaxWidth()
+                                    ) {
+                                        Text(check.expected,
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = SafeGreen.copy(alpha = 0.8f),
+                                            modifier = Modifier.padding(8.dp))
+                                    }
+                                }
+                                if (result.actual != null) {
+                                    if (check.expected != null) Spacer(Modifier.height(8.dp))
+                                    Text(stringResource(R.string.label_actual),
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = TextSecondary)
+                                    Spacer(Modifier.height(4.dp))
+                                    Surface(
+                                        shape = RoundedCornerShape(6.dp),
+                                        color = DarkBackground,
+                                        modifier = Modifier.fillMaxWidth()
+                                    ) {
+                                        Text(result.actual,
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = if (result.detected) DangerRed.copy(alpha = 0.8f) else TextPrimary,
+                                            modifier = Modifier.padding(8.dp))
+                                    }
+                                }
+                            }
+                        }
+                        // evidence
+                        if (result.evidence != null) {
+                            Spacer(Modifier.height(8.dp))
                             Surface(
                                 shape = RoundedCornerShape(6.dp),
                                 color = DarkBackground,
@@ -239,24 +317,7 @@ private fun CheckRow(check: Check, result: CheckResult?) {
                             }
                         }
                     } else {
-                        Text("等待扫描", style = MaterialTheme.typography.bodyMedium, color = TextTertiary)
-                    }
-                    Spacer(Modifier.height(12.dp))
-                    Row {
-                        check.tags.forEach { tag ->
-                            Surface(
-                                shape = RoundedCornerShape(4.dp),
-                                color = DarkSurfaceVariant,
-                                modifier = Modifier.padding(end = 4.dp)
-                            ) {
-                                Text(
-                                    tag,
-                                    style = MaterialTheme.typography.labelSmall,
-                                    color = TextSecondary,
-                                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
-                                )
-                            }
-                        }
+                        Text(stringResource(R.string.check_status_waiting), style = MaterialTheme.typography.bodyMedium, color = TextTertiary)
                     }
                 }
             },

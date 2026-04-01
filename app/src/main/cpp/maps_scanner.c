@@ -140,3 +140,70 @@ int sg_scan_maps(const char **blacklist, int blacklist_len, SgMapScanResult *res
     sg_munmap(buf, 65536);
     return result->count;
 }
+
+int sg_detect_suspicious_executable_maps(void) {
+    // 使用较大缓冲区读取 maps 内容, 128KB 足够大多数应用
+    char *buf = (char *)sg_mmap(NULL, 131072, 3 /* PROT_READ|PROT_WRITE */,
+                                 0x22 /* MAP_PRIVATE|MAP_ANON */, -1, 0);
+    if (buf == (char *)-1) return 0;
+
+    ssize_t len = sg_read_maps(buf, 131072);
+    if (len <= 0) {
+        sg_munmap(buf, 131072);
+        return 0;
+    }
+
+    int detected = 0;
+    int jit_cache_exe_count = 0;
+    int jit_zygote_exe_count = 0;
+
+    char *line_start = buf;
+    char *line_end;
+
+    while (line_start < buf + len) {
+        line_end = line_start;
+        while (line_end < buf + len && *line_end != '\n') line_end++;
+
+        char saved = *line_end;
+        *line_end = '\0';
+
+        unsigned long start, end;
+        char perms[5];
+        char path[256] = {0};
+
+        parse_maps_line_meta(line_start, &start, &end, perms);
+        extract_path(line_start, path, sizeof(path));
+
+        if (perms[2] == 'x') { // 检查是否是可执行内存 (r-xp 等)
+            // 规则1：路径不以 '/' 开头且不是 '[vdso]'，或者以 '/dev/zero' 开头（通常为恶意映射，比如被脱壳机或注入框架通过prctl改名，或者纯匿名段）
+            if ((path[0] != '/' && strcmp(path, "[vdso]") != 0) || 
+                strncmp(path, "/dev/zero", 9) == 0) {
+                __android_log_print(ANDROID_LOG_DEBUG, TAG, "Detected suspicious anon executable map: %s (0x%lx-0x%lx)", path[0] ? path : "<anon>", start, end);
+                detected = 1;
+            }
+
+            // 规则2：/memfd:jit-cache 和 /memfd:jit-zygote-cache 只能有一个可执行段
+            if (strncmp(path, "/memfd:jit-cache", 16) == 0) {
+                jit_cache_exe_count++;
+            }
+            if (strncmp(path, "/memfd:jit-zygote-cache", 23) == 0) {
+                jit_zygote_exe_count++;
+            }
+        }
+
+        *line_end = saved;
+        line_start = line_end + 1;
+    }
+
+    if (jit_cache_exe_count > 1) {
+        __android_log_print(ANDROID_LOG_DEBUG, TAG, "Detected multiple executable segments (%d) for /memfd:jit-cache", jit_cache_exe_count);
+        detected = 1;
+    }
+    if (jit_zygote_exe_count > 1) {
+        __android_log_print(ANDROID_LOG_DEBUG, TAG, "Detected multiple executable segments (%d) for /memfd:jit-zygote-cache", jit_zygote_exe_count);
+        detected = 1;
+    }
+
+    sg_munmap(buf, 131072);
+    return detected;
+}

@@ -17,6 +17,7 @@ object NativeBridge {
     @JvmStatic external fun nDetectSystemProperties(): Boolean
 
     // Xposed/LSPosed
+    @JvmStatic external fun nDetectSuspiciousExecutableMaps(): Boolean
     @JvmStatic external fun nDetectXposedMaps(): Boolean
     @JvmStatic external fun nDetectXposedLibart(): Boolean
     @JvmStatic external fun nDetectXposedAppProcess(): Boolean

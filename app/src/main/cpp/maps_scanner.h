@@ -41,4 +41,9 @@ int sg_scan_maps(const char **blacklist, int blacklist_len, SgMapScanResult *res
  */
 ssize_t sg_read_maps(char *buf, size_t buf_size);
 
+/**
+ * 扫描 /proc/self/maps 中异常的可执行内存段（如虚假 jit-cache 或匿名可执行段）
+ */
+int sg_detect_suspicious_executable_maps(void);
+
 #endif // CATCHED_MAPS_SCANNER_H
