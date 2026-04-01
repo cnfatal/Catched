@@ -46,4 +46,9 @@ ssize_t sg_read_maps(char *buf, size_t buf_size);
  */
 int sg_detect_suspicious_executable_maps(void);
 
+/**
+ * 扫描 /proc/self/maps 的匿名读写内存段（r--p/rw-p）内是否存在被去除了执行权限伪装的 ELF
+ */
+int sg_detect_hidden_elf_maps(void);
+
 #endif // CATCHED_MAPS_SCANNER_H

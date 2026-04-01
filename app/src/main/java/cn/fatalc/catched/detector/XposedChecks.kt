@@ -222,6 +222,13 @@ fun xposedChecks(context: Context): List<Check> = listOf(
         CheckResult(NativeBridge.nDetectSuspiciousExecutableMaps())
     },
 
+    Check("xp.hidden_elf", G, "被伪装的 ELF 隐敲扫描",
+        "针对内核层通过修改权限将 mmap 的可执行文件强行标记为无执行权限 (-)、并抹除路径信息的隐蔽手段（常见于某些修改 ROM 或内核的黑产设备），扫描可读权限下匿名段数据头部是否掩盖了一个可执行的 ELF 库。",
+        setOf("native", "svc", "memory")
+    ) {
+        CheckResult(NativeBridge.nDetectHiddenElfMaps())
+    },
+
     Check("xp.libart", G, "libart.so 扫描",
         "通过 SVC 读取已加载的 libart.so 内存区域，在其 .rodata/.data 段中搜索 \"xposed\"、\"XposedBridge\" 等特征字符串，可检测修改版 ART",
         setOf("native", "svc", "memory")

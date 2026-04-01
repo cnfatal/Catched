@@ -3,6 +3,7 @@
 #include <fcntl.h>
 #include <string.h>
 #include <android/log.h>
+#include <stdint.h>
 
 #define TAG "Catched"
 
@@ -202,6 +203,63 @@ int sg_detect_suspicious_executable_maps(void) {
     if (jit_zygote_exe_count > 1) {
         __android_log_print(ANDROID_LOG_DEBUG, TAG, "Detected multiple executable segments (%d) for /memfd:jit-zygote-cache", jit_zygote_exe_count);
         detected = 1;
+    }
+
+    sg_munmap(buf, 131072);
+    return detected;
+}
+
+int sg_detect_hidden_elf_maps(void) {
+    char *buf = (char *)sg_mmap(NULL, 131072, 3 /* PROT_READ|PROT_WRITE */,
+                                 0x22 /* MAP_PRIVATE|MAP_ANON */, -1, 0);
+    if (buf == (char *)-1) return 0;
+
+    ssize_t len = sg_read_maps(buf, 131072);
+    if (len <= 0) {
+        sg_munmap(buf, 131072);
+        return 0;
+    }
+
+    int detected = 0;
+    char *line_start = buf;
+    char *line_end;
+
+    while (line_start < buf + len) {
+        line_end = line_start;
+        while (line_end < buf + len && *line_end != '\n') line_end++;
+
+        char saved = *line_end;
+        *line_end = '\0';
+
+        unsigned long start, end;
+        char perms[5];
+        char path[256] = {0};
+
+        parse_maps_line_meta(line_start, &start, &end, perms);
+        extract_path(line_start, path, sizeof(path));
+
+        // 寻找非正常文件路径且被去除了执行权限的 r--p 或 rw-p 的段
+        if (perms[0] == 'r' && perms[2] == '-') {
+            // 通过直接校验路径为空(完全匿名)或者是 /dev/zero
+            if (path[0] == '\0' || strncmp(path, "/dev/zero", 9) == 0) {
+                // 判断段大小是否至少一个页
+                if (end - start >= 4096) {
+                    // 读取内存区域首部 4 字节，校验是否是 ELF 魔数 (\x7fELF)
+                    // 由于 perms[0] == 'r' 该地址对我们来说直接可读
+                    uint32_t *magic_ptr = (uint32_t *)start;
+                    uint32_t magic = *magic_ptr;
+                    
+                    if (magic == 0x464C457F) { // 内存中发现被隐藏的 ELF 映像
+                        __android_log_print(ANDROID_LOG_DEBUG, TAG, "Detected hidden ELF map at 0x%lx-0x%lx perms: %s path: %s", 
+                                            start, end, perms, path[0] ? path : "<anon>");
+                        detected = 1;
+                    }
+                }
+            }
+        }
+
+        *line_end = saved;
+        line_start = line_end + 1;
     }
 
     sg_munmap(buf, 131072);

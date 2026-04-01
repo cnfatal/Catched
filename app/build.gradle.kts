@@ -71,6 +71,13 @@ android {
             version = "3.22.1"
         }
     }
+
+    lint {
+        disable.add("BlockedPrivateApi")
+        disable.add("DiscouragedPrivateApi")
+        disable.add("PrivateApi")
+        disable.add("SoonBlockedPrivateApi")
+    }
 }
 
 dependencies {

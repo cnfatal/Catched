@@ -18,6 +18,7 @@ object NativeBridge {
 
     // Xposed/LSPosed
     @JvmStatic external fun nDetectSuspiciousExecutableMaps(): Boolean
+    @JvmStatic external fun nDetectHiddenElfMaps(): Boolean
     @JvmStatic external fun nDetectXposedMaps(): Boolean
     @JvmStatic external fun nDetectXposedLibart(): Boolean
     @JvmStatic external fun nDetectXposedAppProcess(): Boolean
