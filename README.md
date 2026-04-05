@@ -2,6 +2,12 @@
 
 An Android security detection toolkit that identifies Root, Xposed, Frida, and LSPatch/NPatch environments through multi-layered analysis combining Java reflection and raw SVC syscalls.
 
+## Screenshot
+
+<p align="center">
+  <img src="docs/screenshot.png" width="300" alt="Catched Screenshot" />
+</p>
+
 ## Features
 
 - **Broad Coverage**: Identifies Root, Magisk, Xposed, LSPosed, Frida, and Repackaging (NPatch/LSPatch) environments across 40+ granular checks.
@@ -12,15 +18,19 @@ An Android security detection toolkit that identifies Root, Xposed, Frida, and L
 ## Detection Coverage
 
 ### Root / Environment Integrity
+
 Identifies su binaries, Magisk-specific mount points, anomalous OverlayFS structures, Unix sockets, and altered SELinux contexts utilizing raw SVC access and property analysis.
 
 ### Xposed Framework
+
 Detects traditional Xposed and modern LSPosed implementations by analyzing BaseDexClassLoader instances, method caches, anomalous native method flags, and suspicious libart.so modifications.
 
 ### Frida
+
 Locates frida-agent and gadget injections through `/proc/self/maps` scanning, specific TCP port binding probes, D-Bus AUTH handshake verification, and memory feature scanning for anonymous mapped memory.
 
 ### App Repackaging (NPatch/LSPatch)
+
 Uncovers modified ApplicationInfo metadata, injected AppComponentFactory entries, anomalous `cache/npatch/` filesystem structures, and the presence of `libnpatch` shared objects in the process space.
 
 ## Architecture
@@ -76,6 +86,7 @@ adb install -r app/build/outputs/apk/debug/app-debug.apk
 ```
 
 **Requirements:**
+
 - Android Studio with NDK installed
 - Min SDK 26 (Android 8.0)
 - Target SDK 36
