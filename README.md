@@ -75,6 +75,10 @@ Check("fr.maps", "Frida", "maps SO scan", "...", setOf("native", "svc")) {
 
 **SVC syscall bypass** — Native checks use inline assembly SVC instructions instead of libc wrappers, making them resistant to LD_PRELOAD / GOT hooking.
 
+## Documentation
+
+Detailed documentation on supported frameworks and detection techniques, see [docs](docs/).
+
 ## Build
 
 ```bash
