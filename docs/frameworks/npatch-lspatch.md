@@ -24,12 +24,13 @@ NPatch (and its predecessor LSPatch) provides a rootless alternative to LSPosed 
 
 ## Variants
 
-| Variant                 | Description                                                          | Root Required |
-| ----------------------- | -------------------------------------------------------------------- | :-----------: |
-| LSPatch                 | Original tool by the LSPosed team, modifies APK offline              |      No       |
-| NPatch                  | Fork/successor of LSPatch with continued development                 |      No       |
-| LSPatch (portable mode) | Creates a manager app that performs patching on-device               |      No       |
-| JShook                  | Similar repackaging concept but uses JavaScript-based hooking engine |      No       |
+| Variant                 | Description                                                                                                                  | Root Required |
+| ----------------------- | ---------------------------------------------------------------------------------------------------------------------------- | :-----------: |
+| LSPatch                 | Original tool by the LSPosed team, modifies APK offline                                                                      |      No       |
+| NPatch                  | Fork/successor of LSPatch with continued development                                                                         |      No       |
+| LSPatch (portable mode) | Creates a manager app that performs patching on-device                                                                       |      No       |
+| JShook                  | Similar repackaging concept but uses JavaScript-based hooking engine                                                         |      No       |
+| NPatch (minimal mode)   | Minimal repackaging — only patches appComponentFactory and injects loader SO; no full DEX patching, smaller artifact surface |      No       |
 
 ---
 
@@ -55,22 +56,31 @@ Persistent evidence this framework leaves that cannot be fully erased:
 
 Known anti-detection techniques supported by this framework:
 
-| Technique                     | Description                                                                                  |
-| ----------------------------- | -------------------------------------------------------------------------------------------- |
-| GOT hook on openat()          | Redirects file read operations on the original APK path to the patched version transparently |
-| Obfuscated stub class names   | Renames the appComponentFactory stub class to avoid string-pattern-based detection           |
-| Asset directory name changes  | Uses non-standard names for the asset directory to evade known-path checks                   |
-| Metadata stripping after init | Removes identifying metadata keys from ApplicationInfo after initialization completes        |
+| Technique                            | Description                                                                                                                                                                                 |
+| ------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| GOT hook on openat()                 | Redirects file read operations on the original APK path to the patched version transparently                                                                                                |
+| Obfuscated stub class names          | Renames the appComponentFactory stub class to avoid string-pattern-based detection                                                                                                          |
+| Asset directory name changes         | Uses non-standard names for the asset directory to evade known-path checks                                                                                                                  |
+| Metadata stripping after init        | Removes identifying metadata keys from ApplicationInfo after initialization completes                                                                                                       |
+| Seccomp-BPF syscall interception     | Installs BPF filter via `prctl(PR_SET_SECCOMP)` to intercept `openat` SVC calls; SIGSYS handler redirects `/proc/self/maps` and APK reads to filtered copies, defeating SVC-based detection |
+| Inline code patching of Java methods | Patches AOT/JIT compiled code of target methods instead of modifying ArtMethod fields; avoids kAccNative detection while achieving the same hook effect                                     |
+| RegisterNatives redirection          | Intercepts `RegisterNatives` JNI call to redirect native method bindings; avoids modifying Java-visible method metadata                                                                     |
 
 ---
 
 ## Techniques Used
 
-| Technique              | Doc                                                                  | Role in This Framework                                                   |
-| ---------------------- | -------------------------------------------------------------------- | ------------------------------------------------------------------------ |
-| Java reflection        | [java-reflection.md](../techniques/java-reflection.md)               | Inspect appComponentFactory, metaData, and sourceDir via ApplicationInfo |
-| Filesystem path check  | [filesystem-path-check.md](../techniques/filesystem-path-check.md)   | Detect NPatch/LSPatch cache directories and loader files on disk         |
-| Signature verification | [signature-verification.md](../techniques/signature-verification.md) | Compare APK signing certificate against expected original certificate    |
-| GOT/PLT hook detection | [got-plt-hook.md](../techniques/got-plt-hook.md)                     | Detect redirected openat() entries in the Global Offset Table            |
-| procfs scanning        | [procfs-scanning.md](../techniques/procfs-scanning.md)               | Scan `/proc/self/maps` for libnpatch_jni.so and liblspatch_jni.so        |
-| ClassLoader analysis   | [classloader-analysis.md](../techniques/classloader-analysis.md)     | Detect additional ClassLoaders introduced by the embedded Xposed bridge  |
+| Technique                   | Doc                                                                            | Role in This Framework                                                    |
+| --------------------------- | ------------------------------------------------------------------------------ | ------------------------------------------------------------------------- |
+| Java reflection             | [java-reflection.md](../techniques/java-reflection.md)                         | Inspect appComponentFactory, metaData, and sourceDir via ApplicationInfo  |
+| Filesystem path check       | [filesystem-path-check.md](../techniques/filesystem-path-check.md)             | Detect NPatch/LSPatch cache directories and loader files on disk          |
+| Signature verification      | [signature-verification.md](../techniques/signature-verification.md)           | Compare APK signing certificate against expected original certificate     |
+| GOT/PLT hook detection      | [got-plt-hook.md](../techniques/got-plt-hook.md)                               | Detect redirected openat() entries in the Global Offset Table             |
+| procfs scanning             | [procfs-scanning.md](../techniques/procfs-scanning.md)                         | Scan `/proc/self/maps` for libnpatch_jni.so and liblspatch_jni.so         |
+| ClassLoader analysis        | [classloader-analysis.md](../techniques/classloader-analysis.md)               | Detect additional ClassLoaders introduced by the embedded Xposed bridge   |
+| Seccomp-BPF detection       | [seccomp-bpf-detection.md](../techniques/seccomp-bpf-detection.md)             | Detect BPF filters installed to intercept SVC-based detection syscalls    |
+| Signal handler inspection   | [signal-handler-inspection.md](../techniques/signal-handler-inspection.md)     | Detect SIGSYS handler installed by seccomp-based evasion                  |
+| Inline code patching        | [inline-code-patching.md](../techniques/inline-code-patching.md)               | Detect patched function prologues in AOT/JIT compiled method code         |
+| ArtMethod introspection     | [artmethod-introspection.md](../techniques/artmethod-introspection.md)         | Detect kAccCompileDontBother and other compilation-control flag anomalies |
+| ART internal hook detection | [art-internal-hook-detection.md](../techniques/art-internal-hook-detection.md) | Detect hooks on libart.so internal functions used for method resolution   |
+| SVC direct syscall          | [svc-direct-syscall.md](../techniques/svc-direct-syscall.md)                   | Use SVC to bypass GOT hooks on openat() installed by NPatch/LSPatch       |

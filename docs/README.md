@@ -11,6 +11,7 @@ Detection targets — what Catched identifies.
 - [Debugger](frameworks/debugger.md)
 - [Emulator](frameworks/emulator.md)
 - [Device Integrity](frameworks/device-integrity.md)
+- [Native Inline Hook](frameworks/native-inline-hook.md)
 
 ## [Techniques](techniques/)
 
@@ -30,3 +31,12 @@ Detection methods — how Catched performs checks.
 - [APK Signature Verification](techniques/signature-verification.md)
 - [System Property Analysis](techniques/system-property-analysis.md)
 - [Hardware Fingerprint Analysis](techniques/hardware-fingerprint.md)
+- [Seccomp-BPF Filter Detection](techniques/seccomp-bpf-detection.md)
+- [Inline Code Patching Detection](techniques/inline-code-patching.md)
+- [Code Integrity Verification](techniques/code-integrity-verification.md)
+- [ART Internal Hook Detection](techniques/art-internal-hook-detection.md)
+- [Signal Handler Inspection](techniques/signal-handler-inspection.md)
+- [JIT Cache Validation](techniques/jit-cache-validation.md)
+- [ELF Segment Gap Analysis](techniques/elf-segment-gap-analysis.md)
+- [Return Address Validation](techniques/return-address-validation.md)
+- [vDSO Validation](techniques/vdso-validation.md)

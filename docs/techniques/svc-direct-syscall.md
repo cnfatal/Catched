@@ -64,13 +64,13 @@ The invariant is that the Linux kernel syscall interface is immutable from users
 
 ### Anti-Evasion Properties
 
-| Property                    | Explanation                                                                                                                           |
-| --------------------------- | ------------------------------------------------------------------------------------------------------------------------------------- |
-| Resistant to libc hooks     | SVC does not call any libc function; the instruction transfers control directly to the kernel exception vector                        |
-| Resistant to GOT/PLT hijack | No PLT stub or GOT indirection is involved; the syscall is emitted as inline assembly                                                 |
-| Resistant to LD_PRELOAD     | LD_PRELOAD only affects dynamic symbol resolution; inline assembly is resolved at compile time                                        |
-| Resistant to inline hooking | The SVC instruction is embedded in the caller's `.text` section, not in libc; patching the caller requires knowing its exact location |
-| Remaining bypass surface    | Kernel-level interception (LKM, KernelSU hooks) can still modify syscall results; seccomp-bpf filters can block specific syscalls     |
+| Property                    | Explanation                                                                                                                                                         |
+| --------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Resistant to libc hooks     | SVC does not call any libc function; the instruction transfers control directly to the kernel exception vector                                                      |
+| Resistant to GOT/PLT hijack | No PLT stub or GOT indirection is involved; the syscall is emitted as inline assembly                                                                               |
+| Resistant to LD_PRELOAD     | LD_PRELOAD only affects dynamic symbol resolution; inline assembly is resolved at compile time                                                                      |
+| Resistant to inline hooking | The SVC instruction is embedded in the caller's `.text` section, not in libc; patching the caller requires knowing its exact location                               |
+| Remaining bypass surface    | Kernel-level interception (LKM, KernelSU hooks) can still modify syscall results; seccomp-bpf filters can intercept specific syscalls — see dedicated section below |
 
 ### Detection Strategy
 
@@ -109,6 +109,41 @@ if fd >= 0:
 | Syscall number mismatch across ABI versions            | Use compile-time architecture detection (`#ifdef __aarch64__`) to select correct syscall numbers                    |
 | seccomp-bpf blocking SVC calls                         | Detect seccomp filters via `/proc/self/status` Seccomp field; if active, fall back to alternative detection methods |
 | Compiler reordering or optimizing away inline assembly | Use `volatile` and memory clobber constraints to prevent compiler from removing or reordering SVC instructions      |
+
+---
+
+## Seccomp-BPF: The Primary Threat to SVC
+
+Seccomp-BPF is the **only userspace mechanism** capable of intercepting SVC direct syscalls, making it the most critical threat to all SVC-based detection in this project.
+
+### How It Undermines SVC
+
+1. **Filter installation** — Attacker installs BPF bytecode via `prctl(PR_SET_SECCOMP, SECCOMP_MODE_FILTER, &prog)` that matches specific syscall numbers (e.g., `openat`=56 on ARM64)
+2. **SECCOMP_RET_TRAP delivery** — When a filtered SVC executes, the kernel delivers SIGSYS instead of completing the syscall
+3. **SIGSYS handler interception** — The attacker's signal handler inspects `ucontext_t`, reads syscall arguments, and can modify the pathname argument to redirect file reads (e.g., `/proc/self/maps` → filtered copy, `base.apk` → original unsigned APK)
+4. **Transparent to caller** — The SVC wrapper receives the redirected result and has no indication that interception occurred
+
+### Impact on Detection
+
+| Detection Technique                 | Impact                                                          |
+| ----------------------------------- | --------------------------------------------------------------- |
+| Procfs scanning (`/proc/self/maps`) | Can be redirected to filtered copy omitting injected SO entries |
+| Filesystem path check (su binaries) | Can return fake "not found" for sensitive paths                 |
+| APK signature verification          | Can redirect `base.apk` reads to pre-repackaging original       |
+| Network probe (port scan)           | Socket syscalls can be intercepted to hide open ports           |
+| Memory pattern scan                 | `openat` of `/proc/self/mem` can be redirected                  |
+
+### Countermeasures
+
+Detecting seccomp-bpf interception is covered in detail in [Seccomp-BPF Filter Detection](seccomp-bpf-detection.md). Key approaches:
+
+1. **Read `/proc/self/status`** via SVC — check `Seccomp:` field (0=disabled, 2=filter active)
+2. **Check `Seccomp_filters:`** field (Linux 5.10+) — count of installed BPF programs, compare against Zygote baseline
+3. **Inspect SIGSYS handler** via `rt_sigaction` SVC — non-SIG_DFL indicates interception
+4. **Timing side-channel** — SVC openat latency >5μs on a simple path suggests filter+handler overhead
+5. **Self-validation** — Read a file with known content via SVC and verify the result matches expectations
+
+> **Critical**: Seccomp-bpf detection should run **before** all other SVC-based detection to validate that results can be trusted.
 
 ---
 

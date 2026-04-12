@@ -24,18 +24,22 @@ From a defender's perspective, procfs is the most information-rich data source a
 
 ### Artifacts
 
-| Artifact                        | Location                  | Indicator                                                                                     |
-| ------------------------------- | ------------------------- | --------------------------------------------------------------------------------------------- |
-| Injected shared library mapping | `/proc/self/maps`         | Library path containing agent names or unexpected `.so` files in writable directories         |
-| Anonymous executable memory     | `/proc/self/maps`         | `rwxp` or `r-xp` anonymous mappings at unusual addresses (injected code without file backing) |
-| Hidden ELF headers              | `/proc/self/maps`         | `rw-p` anonymous pages containing ELF magic bytes (`\x7fELF`) — code disguised as data        |
-| Worker thread names             | `/proc/self/task/*/comm`  | Thread names like `gmain`, `gdbus`, `gum-js-loop`, `pool-frida`, or similar patterns          |
-| TCP listener on known ports     | `/proc/net/tcp`           | Local address with hex port `69A2` (27042) or `69A3` (27043)                                  |
-| Unix domain socket              | `/proc/net/unix`          | Socket path containing injection framework identifiers                                        |
-| Overlay/bind mount              | `/proc/self/mountinfo`    | Mount entries with `magisk` keyword or unexpected OverlayFS layers over `/system`             |
-| TracerPid non-zero              | `/proc/self/status`       | `TracerPid` field > 0 indicates another process is ptrace-attached                            |
-| SELinux context anomaly         | `/proc/self/attr/current` | Context string containing unexpected domain labels (e.g., `zygisk`, `magisk`)                 |
-| Open file descriptors           | `/proc/self/fd/*`         | Symlinks pointing to pipes, sockets, or files associated with injection agents                |
+| Artifact                        | Location                  | Indicator                                                                                                       |
+| ------------------------------- | ------------------------- | --------------------------------------------------------------------------------------------------------------- |
+| Injected shared library mapping | `/proc/self/maps`         | Library path containing agent names or unexpected `.so` files in writable directories                           |
+| Anonymous executable memory     | `/proc/self/maps`         | `rwxp` or `r-xp` anonymous mappings at unusual addresses (injected code without file backing)                   |
+| Hidden ELF headers              | `/proc/self/maps`         | `rw-p` anonymous pages containing ELF magic bytes (`\x7fELF`) — code disguised as data                          |
+| Worker thread names             | `/proc/self/task/*/comm`  | Thread names like `gmain`, `gdbus`, `gum-js-loop`, `pool-frida`, or similar patterns                            |
+| TCP listener on known ports     | `/proc/net/tcp`           | Local address with hex port `69A2` (27042) or `69A3` (27043)                                                    |
+| Unix domain socket              | `/proc/net/unix`          | Socket path containing injection framework identifiers                                                          |
+| Overlay/bind mount              | `/proc/self/mountinfo`    | Mount entries with `magisk` keyword or unexpected OverlayFS layers over `/system`                               |
+| TracerPid non-zero              | `/proc/self/status`       | `TracerPid` field > 0 indicates another process is ptrace-attached                                              |
+| SELinux context anomaly         | `/proc/self/attr/current` | Context string containing unexpected domain labels (e.g., `zygisk`, `magisk`)                                   |
+| Open file descriptors           | `/proc/self/fd/*`         | Symlinks pointing to pipes, sockets, or files associated with injection agents                                  |
+| Seccomp filter active           | `/proc/self/status`       | `Seccomp:` field = 2 (SECCOMP_MODE_FILTER) — attacker installed BPF filter for syscall interception             |
+| Seccomp filter count            | `/proc/self/status`       | `Seccomp_filters:` field > 0 (Linux 5.10+) — number of installed BPF programs                                   |
+| Capability anomaly              | `/proc/self/status`       | `CapEff:` / `CapPrm:` fields differ from untampered baseline — elevated capabilities after privilege escalation |
+| Inode inconsistency in maps     | `/proc/self/maps`         | Inode in maps entry does not match `stat()` of the backing file — file replaced or bind-mounted                 |
 
 ### Injection PoC _(optional)_
 
@@ -94,8 +98,11 @@ The invariant is that every memory mapping, thread, socket, and mount in a proce
 6. **Parse /proc/net/unix** — Search socket paths for known injection framework socket name patterns.
 7. **Parse /proc/self/mountinfo** — Search for OverlayFS entries or entries with `magisk` in the mount source or filesystem type.
 8. **Read /proc/self/status** — Extract `TracerPid` field; if non-zero, a debugger is attached.
-9. **Read /proc/self/attr/current** — Check SELinux context for unexpected domain labels.
-10. **Enumerate /proc/self/fd/** — Use `svc_readlinkat()` on each fd entry; flag file descriptors pointing to suspicious pipes, deleted files, or agent-related paths.
+9. **Check Seccomp fields in /proc/self/status** — Extract the `Seccomp:` field value. If it equals 2 (`SECCOMP_MODE_FILTER`), a BPF filter is active that can intercept any SVC-based detection. On Linux 5.10+ (Android 12+), also check `Seccomp_filters:` for the count of installed programs. A clean Zygote-forked process should have `Seccomp: 2` with exactly the Android system filter count (typically 1); additional filters indicate injection. See [seccomp-bpf-detection.md](seccomp-bpf-detection.md) for full detection.
+10. **Check capability fields in /proc/self/status** — Read `CapEff:` and `CapPrm:` fields. A normal app process should have null (0000000000000000) effective and permitted capabilities. Non-zero values suggest privilege escalation via root exploit or capability injection. Compare against a baseline captured at process startup.
+11. **Validate inode consistency for mapped files** — For each file-backed entry in `/proc/self/maps`, extract the inode from the maps line (field 5). Then `stat()` the backing file path (via SVC `newfstatat`) and compare the st_ino. A mismatch indicates the file was replaced after mapping (e.g., OverlayFS bind mount or library hot-swap). This catches attacks that replace system libraries with hooked versions.
+12. **Read /proc/self/attr/current** — Check SELinux context for unexpected domain labels.
+13. **Enumerate /proc/self/fd/** — Use `svc_readlinkat()` on each fd entry; flag file descriptors pointing to suspicious pipes, deleted files, or agent-related paths.
 
 ### Detection PoC _(optional)_
 
@@ -136,13 +143,15 @@ for each line in data:
 
 ### False Positive Risks
 
-| Scenario                                                                | Mitigation                                                                                                                                          |
-| ----------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Legitimate apps using anonymous executable pages (JIT engines, WebView) | Cross-reference with known legitimate JIT regions (e.g., ART JIT code cache has predictable address range); only flag pages outside expected ranges |
-| Thread names colliding with patterns (e.g., app uses "main" thread)     | Use exact-match patterns rather than substring matches; combine thread name detection with other signals                                            |
-| Debug builds with TracerPid set by Android Studio                       | Check `ro.debuggable` system property; suppress TracerPid warnings in debug builds                                                                  |
-| VPN apps creating /proc/net/tcp entries on unusual ports                | Verify the listening address is `0.0.0.0` or `127.0.0.1` and correlate with maps-based detection                                                    |
-| System apps with legitimate OverlayFS mounts (RRO)                      | Only flag OverlayFS mounts that overlay `/system` partitions with sources outside expected OEM paths                                                |
+| Scenario                                                                | Mitigation                                                                                                                                                   |
+| ----------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Legitimate apps using anonymous executable pages (JIT engines, WebView) | Cross-reference with known legitimate JIT regions (e.g., ART JIT code cache has predictable address range); only flag pages outside expected ranges          |
+| Thread names colliding with patterns (e.g., app uses "main" thread)     | Use exact-match patterns rather than substring matches; combine thread name detection with other signals                                                     |
+| Debug builds with TracerPid set by Android Studio                       | Check `ro.debuggable` system property; suppress TracerPid warnings in debug builds                                                                           |
+| VPN apps creating /proc/net/tcp entries on unusual ports                | Verify the listening address is `0.0.0.0` or `127.0.0.1` and correlate with maps-based detection                                                             |
+| System apps with legitimate OverlayFS mounts (RRO)                      | Only flag OverlayFS mounts that overlay `/system` partitions with sources outside expected OEM paths                                                         |
+| System seccomp policy active by default                                 | Android applies a system seccomp policy at Zygote fork; detect filter count exceeding the baseline (typically 1) rather than mere presence of seccomp mode 2 |
+| Library inode changing after system OTA update                          | OTA updates may replace libraries, causing inode mismatch for running processes; re-baseline after detecting a newly booted state                            |
 
 ---
 

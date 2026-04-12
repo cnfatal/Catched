@@ -24,13 +24,17 @@ From a defender's perspective, memory pattern scanning is essential because it o
 
 ### Artifacts
 
-| Artifact                               | Location                 | Indicator                                                          |
-| -------------------------------------- | ------------------------ | ------------------------------------------------------------------ |
-| Byte signature strings                 | Anonymous memory regions | "LIBFRIDA", "frida:rpc", "frida-agent", "gum-js-loop", "gmain"     |
-| Anonymous executable segment           | `/proc/self/maps`        | `r-xp` region with no file path or backed by `/dev/zero`           |
-| Multiple jit-cache executable segments | `/proc/self/maps`        | More than one `r-xp` region for `/memfd:jit-cache`                 |
-| Hidden ELF in non-executable region    | Anonymous `r--p` memory  | First 4 bytes are `\x7fELF` (ELF magic number)                     |
-| Injected shared library mapping        | `/proc/self/maps`        | Named mapping for a library not part of the original APK or system |
+| Artifact                               | Location                 | Indicator                                                                                               |
+| -------------------------------------- | ------------------------ | ------------------------------------------------------------------------------------------------------- |
+| Byte signature strings                 | Anonymous memory regions | "LIBFRIDA", "frida:rpc", "frida-agent", "gum-js-loop", "gmain"                                          |
+| Anonymous executable segment           | `/proc/self/maps`        | `r-xp` region with no file path or backed by `/dev/zero`                                                |
+| Multiple jit-cache executable segments | `/proc/self/maps`        | More than one `r-xp` region for `/memfd:jit-cache`                                                      |
+| Hidden ELF in non-executable region    | Anonymous `r--p` memory  | First 4 bytes are `\x7fELF` (ELF magic number)                                                          |
+| Injected shared library mapping        | `/proc/self/maps`        | Named mapping for a library not part of the original APK or system                                      |
+| Dobby trampoline signature             | Anonymous `r-xp` memory  | Byte pattern `51 00 00 58 20 02 1F D6` (ARM64: LDR X17, #8; BR X17) repeated in trampoline island pages |
+| ShadowHook trampoline signature        | Anonymous `r-xp` memory  | Byte pattern `F1 4F 1F A9 51 00 00 58 20 02 1F D6` (ARM64: STP+LDR X17+BR X17) in hub pages             |
+| android-inline-hook trampoline         | Anonymous `r-xp` memory  | Byte pattern `50 00 00 58 00 02 1F D6` (ARM64: LDR X16, #8; BR X16)                                     |
+| Hook framework config strings          | Anonymous memory regions | "dobby", "shadowhook", "bytehook", "substrate", "frida-gadget" in mapped code/data                      |
 
 ### Injection PoC _(optional)_
 
@@ -79,7 +83,14 @@ The invariant is that a clean process should not contain known injection framewo
 3. **Count jit-cache executable segments** — Count the number of `r-xp` entries whose pathname contains `/memfd:jit-cache`. If the count exceeds one, flag as anomalous — a clean ART runtime produces at most one such segment.
 4. **Detect hidden ELF binaries** — For each anonymous region with `r--p` permissions (readable, not executable, not writable), read the first 4 bytes of the region's base address. If the bytes match `\x7fELF`, flag the region — a legitimate non-executable anonymous mapping should not contain an ELF header.
 5. **Scan for byte signatures** — For each anonymous readable region (`r--p` or `r-xp`), read the region's content and search for known byte patterns: "LIBFRIDA", "frida:rpc", "frida-agent", "gum-js-loop", "gmain". Any match indicates the presence of an injection framework agent.
-6. **Aggregate results** — Combine all flags. Any single positive signal warrants further investigation; multiple signals provide high-confidence detection.
+6. **Scan for native hook trampoline patterns** — For each anonymous executable region (`r-xp`), read the content and search for known trampoline instruction sequences:
+   - ARM64 Dobby: `51 00 00 58 20 02 1F D6` (LDR X17, #8; BR X17) followed by 8-byte target addresses — typically repeated at 16-byte intervals in a trampoline island page
+   - ARM64 ShadowHook: `F1 4F 1F A9 51 00 00 58 20 02 1F D6` (STP X16,X17 + LDR X17 + BR X17)
+   - ARM64 android-inline-hook: `50 00 00 58 00 02 1F D6` (LDR X16, #8; BR X16)
+   - ARM32 generic: `04 F0 1F E5` (LDR PC, [PC, #-4]) followed by a 4-byte absolute address
+   - ARM32 Thumb: `DF F8 00 F0` (LDR.W PC, [PC, #0]) followed by a 4-byte absolute address
+     Multiple trampoline entries in a single anonymous page is a strong indicator of an inline hook framework's trampoline island allocation.
+7. **Aggregate results** — Combine all flags. Any single positive signal warrants further investigation; multiple signals provide high-confidence detection.
 
 ### Detection PoC _(optional)_
 
@@ -122,12 +133,13 @@ if jit_cache_exec_count > 1:
 
 ### False Positive Risks
 
-| Scenario                                                     | Mitigation                                                                                                      |
-| ------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------- |
-| Legitimate JIT-compiled code in anonymous executable regions | Cross-reference with ART JIT code cache expected address ranges; exclude known ART memory regions               |
-| Debug builds with extra memory regions                       | Only flag regions that also match byte signatures or contain ELF headers, not all anonymous executable segments |
-| Third-party SDKs using memfd for legitimate purposes         | Maintain an allowlist of known legitimate memfd region name patterns                                            |
-| String fragments that partially match signatures             | Use full-string matching with boundary checks rather than substring search where possible                       |
+| Scenario                                                     | Mitigation                                                                                                                                                |
+| ------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Legitimate JIT-compiled code in anonymous executable regions | Cross-reference with ART JIT code cache expected address ranges; exclude known ART memory regions                                                         |
+| Debug builds with extra memory regions                       | Only flag regions that also match byte signatures or contain ELF headers, not all anonymous executable segments                                           |
+| Third-party SDKs using memfd for legitimate purposes         | Maintain an allowlist of known legitimate memfd region name patterns                                                                                      |
+| String fragments that partially match signatures             | Use full-string matching with boundary checks rather than substring search where possible                                                                 |
+| Legitimate JNI trampoline code in anonymous pages            | ART runtime may generate JIT trampolines with similar byte sequences; validate that the target address of the branch points outside known ART JIT regions |
 
 ---
 

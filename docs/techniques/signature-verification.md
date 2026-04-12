@@ -72,19 +72,28 @@ The invariant is that the SHA-256 fingerprint of the running APK's signing certi
 
 ### Anti-Evasion Properties
 
-| Property                    | Explanation                                                                                                                                                                                            |
-| --------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| Cryptographic binding       | SHA-256 of the certificate is computationally infeasible to forge — the attacker cannot produce a certificate with the same fingerprint without the original private key                               |
-| System-backed data source   | The certificate is stored in the system's PackageManager database, which is managed by system_server                                                                                                   |
-| Single comparison operation | The check is a simple byte comparison that is hard to partially bypass — it either matches or it doesn't                                                                                               |
-| Remaining bypass surface    | Hooking `PackageManager.getPackageInfo()` or `Signature.toByteArray()` to return original certificate data; patching out the check entirely; using JVMTI to redefine the verification class at runtime |
+| Property                    | Explanation                                                                                                                                                                                   |
+| --------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Cryptographic binding       | SHA-256 of the certificate is computationally infeasible to forge — the attacker cannot produce a certificate with the same fingerprint without the original private key                      |
+| System-backed data source   | The certificate is stored in the system's PackageManager database, which is managed by system_server                                                                                          |
+| Single comparison operation | The check is a simple byte comparison that is hard to partially bypass — it either matches or it doesn't                                                                                      |
+| Direct APK parsing          | Verifying the APK signing block directly by reading the APK file via SVC `openat` bypasses Java-level PM hooks — attacker must intercept both the syscall and the PM API to evade both checks |
+| PM hook detection           | Cross-comparing the certificate from PackageManager with the certificate parsed directly from the APK file exposes PM API hooks when results differ                                           |
+| Remaining bypass surface    | Seccomp-BPF can intercept SVC `openat` to redirect APK file reads to the original unmodified APK; patching out the check entirely; using JVMTI to redefine the verification class at runtime  |
 
 ### Detection Strategy
 
 1. **Retrieve signing certificate** — Call `PackageManager.getPackageInfo(context.getPackageName(), PackageManager.GET_SIGNATURES)` to obtain the `PackageInfo` object containing the APK's signing certificates. Access `packageInfo.signatures[0]` for the primary signing certificate.
 2. **Compute SHA-256 fingerprint** — Convert the `Signature` object to a byte array via `signature.toByteArray()`. Compute the SHA-256 hash of these bytes using `MessageDigest.getInstance("SHA-256")`.
 3. **Compare against known-good value** — Compare the computed fingerprint against a hardcoded expected fingerprint (determined from the release signing key). Use constant-time comparison to prevent timing side-channels.
-4. **Handle mismatch** — If the fingerprints do not match, the APK has been re-signed, indicating repackaging or tampering.
+4. **Direct APK file verification (anti-PM-hook)** — To defeat `PackageManager.getPackageInfo()` hooks that return fake certificates:
+   - Open the APK file directly via SVC `openat` using the path from `context.getApplicationInfo().sourceDir`
+   - Parse the APK signing block (v2/v3 signature) from the ZIP file structure
+   - Extract the certificate and compute SHA-256 independently of PackageManager
+   - Compare this "ground truth" fingerprint against the expected value
+     This bypasses any Java-level or JNI-level hook on PackageManager APIs.
+5. **Cross-validate PM result vs direct parse** — Compare the fingerprint from step 3 (via PackageManager) against the fingerprint from step 4 (via direct APK parse). If they differ, the PackageManager API has been hooked to return a fake certificate.
+6. **Handle mismatch** — If any fingerprint does not match the expected value, the APK has been re-signed, indicating repackaging or tampering.
 
 ### Detection PoC _(optional)_
 

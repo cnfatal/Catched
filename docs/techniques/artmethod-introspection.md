@@ -24,13 +24,16 @@ From a defender's perspective, this technique is uniquely powerful because it ta
 
 ### Artifacts
 
-| Artifact                             | Location                                          | Indicator                                                                                  |
-| ------------------------------------ | ------------------------------------------------- | ------------------------------------------------------------------------------------------ |
-| kAccNative flag on non-native method | `ArtMethod.access_flags_` (offset ~4)             | Bit 0x0100 set on a method declared without `native` keyword                               |
-| Entry point outside owning library   | `ArtMethod.entry_point_from_quick_compiled_code_` | Pointer falls outside the memory range of the method's declaring class's DEX/OAT file      |
-| Abnormal ArtMethod struct size       | Address delta between adjacent methods            | Size differs from expected 32–64 bytes on ARM64                                            |
-| Hook dispatch library in memory      | `/proc/self/maps`                                 | Additional shared library mapped with execute permission, containing the hook handler code |
-| Modified ArtMethod backup            | Heap memory                                       | Copy of original ArtMethod stored by the framework for calling the original method         |
+| Artifact                                       | Location                                          | Indicator                                                                                                                                                            |
+| ---------------------------------------------- | ------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| kAccNative flag on non-native method           | `ArtMethod.access_flags_` (offset ~4)             | Bit 0x0100 set on a method declared without `native` keyword                                                                                                         |
+| kAccCompileDontBother flag                     | `ArtMethod.access_flags_` (offset ~4)             | Bit 0x02000000 set — prevents JIT recompilation; required by inline code patching of Java method AOT/JIT output                                                      |
+| kAccPreCompiled cleared                        | `ArtMethod.access_flags_` (offset ~4)             | Bit 0x00200000 (Android R) or 0x00800000 (Android S+) cleared on a pre-compiled method — indicates attacker cleared it to prevent ART assuming code is pre-validated |
+| kAccFastInterpreterToInterpreterInvoke cleared | `ArtMethod.access_flags_` (offset ~4)             | Bit 0x40000000 (Android Q+) cleared — attacker must clear this to force ART through `entry_point_` instead of fast interpreter path                                  |
+| Entry point outside owning library             | `ArtMethod.entry_point_from_quick_compiled_code_` | Pointer falls outside the memory range of the method's declaring class's DEX/OAT file                                                                                |
+| Abnormal ArtMethod struct size                 | Address delta between adjacent methods            | Size differs from expected 32–64 bytes on ARM64                                                                                                                      |
+| Hook dispatch library in memory                | `/proc/self/maps`                                 | Additional shared library mapped with execute permission, containing the hook handler code                                                                           |
+| Modified ArtMethod backup                      | Heap memory                                       | Copy of original ArtMethod stored by the framework for calling the original method                                                                                   |
 
 ### Injection PoC _(optional)_
 
@@ -54,13 +57,14 @@ write_ptr(art_method_ptr + entry_point_offset, &hook_dispatch)
 
 ### Evasion Techniques
 
-| Evasion                      | Description                                                                                                                           |
-| ---------------------------- | ------------------------------------------------------------------------------------------------------------------------------------- |
-| Flag restoration on scan     | Temporarily remove kAccNative when a scan is detected, restore it afterward — requires detecting when introspection occurs            |
-| Entry point within ART range | Allocate hook handler code inside a memory region that mimics ART-generated code ranges                                               |
-| CallerSensitive hooking      | Use ART-internal mechanisms (e.g., class redefinition via JVMTI) that modify methods without setting kAccNative                       |
-| Inline method patching       | Instead of modifying ArtMethod fields, directly patch the compiled code at the entry point address, leaving ArtMethod metadata intact |
-| ArtMethod size preservation  | Avoid extending the ArtMethod struct by storing hook metadata externally, preserving the expected address delta                       |
+| Evasion                      | Description                                                                                                                                                                                                   |
+| ---------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Flag restoration on scan     | Temporarily remove kAccNative when a scan is detected, restore it afterward — requires detecting when introspection occurs                                                                                    |
+| Entry point within ART range | Allocate hook handler code inside a memory region that mimics ART-generated code ranges                                                                                                                       |
+| CallerSensitive hooking      | Use ART-internal mechanisms (e.g., class redefinition via JVMTI) that modify methods without setting kAccNative                                                                                               |
+| Inline method patching       | Instead of modifying ArtMethod fields, directly patch the compiled code at the entry point address — but still requires kAccCompileDontBother to prevent JIT recompilation                                    |
+| ArtMethod size preservation  | Avoid extending the ArtMethod struct by storing hook metadata externally, preserving the expected address delta                                                                                               |
+| Forced AOT compilation       | Use `cmd package compile -m speed` before injection — AOT code in OAT resists JIT GC, reducing the need for some flags; kAccCompileDontBother may still be needed to prevent JIT recompilation of hot methods |
 
 ---
 
@@ -84,8 +88,13 @@ The invariant is threefold: (1) a Java method not declared with the `native` key
 
 1. **Measure ArtMethod size** — Select a class known to have multiple methods (e.g., `java.lang.String`). Use JNI `FromReflectedMethod()` to obtain pointers for two adjacent methods (e.g., `length()` and `isEmpty()`). Calculate the address difference. On ARM64, the expected size is typically 32–64 bytes depending on Android version. An anomalous size indicates the ART runtime or ArtMethod struct has been modified.
 2. **Check access flags for kAccNative** — For a set of known non-native Java methods (framework methods such as `Thread.sleep()`, `String.length()`), obtain each ArtMethod pointer. Read the 4-byte `access_flags_` field at offset ~4. Check if bit 0x0100 (`kAccNative`) is set. If set on a method not declared `native`, the method has been hooked.
-3. **Validate entry point range** — Read the `entry_point_from_quick_compiled_code_` field from the ArtMethod. Parse `/proc/self/maps` to determine the address ranges of boot.oat, the app's OAT file, and the ART JIT code cache. Verify that the entry point falls within one of these legitimate ranges. An entry point pointing to an unknown or injected library indicates a hook.
-4. **Repeat for critical methods** — Apply checks 2 and 3 to methods commonly targeted by hooking frameworks: integrity checks, certificate validation, authentication methods, and cryptographic operations.
+3. **Check access flags for compilation control anomalies** — For the same set of methods, check additional flags that indicate inline code patching of Java method compiled output:
+   - `kAccCompileDontBother` (0x02000000): Prevents JIT recompilation. Required when attacker patches AOT/JIT compiled code — without it, JIT may overwrite the patch. Normal app methods should not have this flag unless ART itself set it on trivial methods.
+   - `kAccPreCompiled` cleared: Android R uses 0x00200000, Android S+ uses 0x00800000. If a method was AOT-compiled but this flag is missing, the attacker may have cleared it.
+   - `kAccFastInterpreterToInterpreterInvoke` (0x40000000, Android Q+): When cleared on a method that should have it, the attacker forced ART to use `entry_point_` instead of the fast interpreter path.
+   - Detection of these flags is critical because **inline code patching of Java method compiled output does NOT set kAccNative** — it is invisible to step 2 above. These compilation-control flags are the only ArtMethod-level indicator of this attack.
+4. **Validate entry point range** — Read the `entry_point_from_quick_compiled_code_` field from the ArtMethod. Parse `/proc/self/maps` to determine the address ranges of boot.oat, the app's OAT file, and the ART JIT code cache. Verify that the entry point falls within one of these legitimate ranges. An entry point pointing to an unknown or injected library indicates a hook.
+5. **Repeat for critical methods** — Apply checks 2 and 3 to methods commonly targeted by hooking frameworks: integrity checks, certificate validation, authentication methods, and cryptographic operations.
 
 ### Detection PoC _(optional)_
 
@@ -116,12 +125,14 @@ for method in probe_methods:
 
 ### False Positive Risks
 
-| Scenario                                       | Mitigation                                                                                                                                   |
-| ---------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------- |
-| JNI methods legitimately marked as native      | Only probe methods that are known to be non-native in the Android source (e.g., pure Java framework methods)                                 |
-| ArtMethod size varies across Android versions  | Calibrate expected size at runtime by measuring known-clean methods on first run; store expected size per Android API level                  |
-| JIT-compiled code in unexpected memory regions | Include JIT code cache regions (identifiable by `/memfd:jit-cache` in maps) in the set of valid entry point ranges                           |
-| Method deoptimization changing entry points    | ART may temporarily redirect methods to the interpreter entry point during deoptimization; include interpreter trampoline addresses as valid |
+| Scenario                                             | Mitigation                                                                                                                                             |
+| ---------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| JNI methods legitimately marked as native            | Only probe methods that are known to be non-native in the Android source (e.g., pure Java framework methods)                                           |
+| ArtMethod size varies across Android versions        | Calibrate expected size at runtime by measuring known-clean methods on first run; store expected size per Android API level                            |
+| JIT-compiled code in unexpected memory regions       | Include JIT code cache regions (identifiable by `/memfd:jit-cache` in maps) in the set of valid entry point ranges                                     |
+| Method deoptimization changing entry points          | ART may temporarily redirect methods to the interpreter entry point during deoptimization; include interpreter trampoline addresses as valid           |
+| ART setting kAccCompileDontBother on trivial methods | ART may mark very simple methods with this flag on its own; cross-validate with method complexity or compare against a known-clean baseline at startup |
+| kAccPreCompiled version differences                  | The bit position differs between Android R (0x00200000) and S+ (0x00800000); use `Build.VERSION.SDK_INT` to select the correct mask                    |
 
 ---
 

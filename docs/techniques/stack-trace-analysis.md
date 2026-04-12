@@ -24,13 +24,16 @@ From a defender's perspective, this technique is valuable because hooking framew
 
 ### Artifacts
 
-| Artifact                 | Location           | Indicator                                         |
-| ------------------------ | ------------------ | ------------------------------------------------- |
-| Xposed dispatch frame    | Thread stack trace | Class name containing `de.robv.android.xposed`    |
-| LSPosed hooker frame     | Thread stack trace | Class name containing `lsposed` or `LSPHooker`    |
-| EdXposed hooker frame    | Thread stack trace | Class name containing `EdHooker`                  |
-| Substrate dispatch frame | Thread stack trace | Class name containing `com.saurik.substrate`      |
-| Generic Xposed keyword   | Thread stack trace | Class name containing `xposed` (case-insensitive) |
+| Artifact                  | Location           | Indicator                                                                                          |
+| ------------------------- | ------------------ | -------------------------------------------------------------------------------------------------- |
+| Xposed dispatch frame     | Thread stack trace | Class name containing `de.robv.android.xposed`                                                     |
+| LSPosed hooker frame      | Thread stack trace | Class name containing `lsposed` or `LSPHooker`                                                     |
+| EdXposed hooker frame     | Thread stack trace | Class name containing `EdHooker`                                                                   |
+| Substrate dispatch frame  | Thread stack trace | Class name containing `com.saurik.substrate`                                                       |
+| Generic Xposed keyword    | Thread stack trace | Class name containing `xposed` (case-insensitive)                                                  |
+| Native trampoline frame   | Native call stack  | PC address resolving to anonymous `r-xp` memory (hook trampoline island)                           |
+| Unexpected native library | Native call stack  | Frame from `libdobby.so`, `libshadowhook.so`, `libbytehook.so` or similar hook framework libraries |
+| Mismatched return address | LR/X30 register    | Return address points to a different library than the calling function's instruction range         |
 
 ### Injection PoC _(optional)_
 
@@ -54,12 +57,13 @@ XposedHelpers.findAndHookMethod(
 
 ### Evasion Techniques
 
-| Evasion                   | Description                                                                                                                   |
-| ------------------------- | ----------------------------------------------------------------------------------------------------------------------------- |
-| Stack trace frame removal | Framework intercepts `Thread.getStackTrace()` or `Throwable.getStackTrace()` to filter out its own frames before returning ★★ |
-| Class name obfuscation    | Framework renames its internal classes to non-obvious names that don't match known patterns ★★★                               |
-| Native-level hooking      | Use PLT/GOT hooks or inline hooks at the native layer, which don't add Java stack frames ★★★★                                 |
-| Proxy class generation    | Generate dynamically-named proxy classes that don't contain recognizable framework keywords ★★★                               |
+| Evasion                   | Description                                                                                                                        |
+| ------------------------- | ---------------------------------------------------------------------------------------------------------------------------------- |
+| Stack trace frame removal | Framework intercepts `Thread.getStackTrace()` or `Throwable.getStackTrace()` to filter out its own frames before returning ★★      |
+| Class name obfuscation    | Framework renames its internal classes to non-obvious names that don't match known patterns ★★★                                    |
+| Native-level hooking      | Use PLT/GOT hooks or inline hooks at the native layer, which don't add Java stack frames ★★★★                                      |
+| Proxy class generation    | Generate dynamically-named proxy classes that don't contain recognizable framework keywords ★★★                                    |
+| Native trampoline cleanup | Deallocate or unmap trampoline pages after hooking, so native stack unwinding cannot resolve the frame to hook infrastructure ★★★★ |
 
 ---
 
@@ -84,6 +88,13 @@ The invariant is that a clean application's call stack should never contain clas
 2. **Filter own package frames** — Remove all frames whose `className` starts with the application's own package prefix to reduce irrelevant results.
 3. **Pattern-match remaining frames** — For each remaining `StackTraceElement`, convert `getClassName()` to lowercase and check if it contains any of the known framework patterns: `"xposed"`, `"de.robv.android.xposed"`, `"com.saurik.substrate"`, `"lsposed"`, `"edhooker"`.
 4. **Report detection** — If any frame matches a known pattern, record the matched class name and method name as evidence of hook framework presence.
+5. **Native stack unwinding** — For native code detection, use `_Unwind_Backtrace` or `libunwindstack` to capture the native call stack. For each frame:
+   - Resolve the frame's PC address against `/proc/self/maps` to determine which library it belongs to
+   - Flag frames that resolve to anonymous executable memory regions (trampoline islands from Dobby/ShadowHook)
+   - Flag frames that resolve to libraries not part of the expected native library set (e.g., `libdobby.so`, `libshadowhook.so`, `libbytehook.so`)
+   - Check if the return address (LR/X30 on ARM64) points to a trampoline code page rather than the calling function's library
+     This catches native inline hooks that do not produce Java stack trace artifacts.
+6. **Cross-validate Java and native stacks** — If a Java method's native implementation invokes through a trampoline, the native stack will show the redirection even when the Java stack appears clean. Combine both Java and native stack analysis for comprehensive coverage.
 
 ### Detection PoC _(optional)_
 

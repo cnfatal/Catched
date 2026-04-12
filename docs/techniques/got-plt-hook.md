@@ -24,13 +24,14 @@ From a defender's perspective, GOT/PLT hook detection is critical because these 
 
 ### Artifacts
 
-| Artifact                          | Location                                      | Indicator                                                                                  |
-| --------------------------------- | --------------------------------------------- | ------------------------------------------------------------------------------------------ |
-| Modified GOT entry                | `.got` / `.got.plt` section of hooked library | Function pointer does not resolve to the expected library's `.text` segment                |
-| Writable GOT pages                | `/proc/self/maps`                             | GOT pages changed from `r--p` to `rw-p` (or remain `rw-p` after modification)              |
-| Inline hook trampoline            | Target function prologue in libc `.text`      | First bytes replaced with branch/load instruction sequence                                 |
-| Modified `.text` page permissions | `/proc/self/maps`                             | libc `.text` pages changed from `r-xp` to `rwxp` (write needed for inline patching)        |
-| Hook handler library              | `/proc/self/maps`                             | Additional shared library containing the hook handler code, mapped with execute permission |
+| Artifact                          | Location                                      | Indicator                                                                                                                |
+| --------------------------------- | --------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------ |
+| Modified GOT entry                | `.got` / `.got.plt` section of hooked library | Function pointer does not resolve to the expected library's `.text` segment                                              |
+| Writable GOT pages                | `/proc/self/maps`                             | GOT pages changed from `r--p` to `rw-p` (or remain `rw-p` after modification)                                            |
+| Inline hook trampoline            | Target function prologue in libc `.text`      | First bytes replaced with branch/load instruction sequence                                                               |
+| Modified `.text` page permissions | `/proc/self/maps`                             | libc `.text` pages changed from `r-xp` to `rwxp` (write needed for inline patching)                                      |
+| Hook handler library              | `/proc/self/maps`                             | Additional shared library containing the hook handler code, mapped with execute permission                               |
+| Trampoline island / code page     | `/proc/self/maps`                             | `r-xp` anonymous memory page near the hooked library — Dobby/ShadowHook allocate nearby pages for trampoline trampolines |
 
 ### Injection PoC _(optional)_
 
@@ -63,6 +64,8 @@ function hook_openat(dirfd, path, flags, mode):
 | Restore-on-check                       | Detect when GOT integrity checks run and temporarily restore original pointers, re-applying hooks afterward                                                      |
 | Symbol interposition                   | Use `LD_PRELOAD` or linker namespace tricks to provide a replacement library that legitimately resolves the symbol, so the GOT entry points to a "valid" library |
 | PLT-only hooking                       | Modify the PLT stub code instead of the GOT data, which some detection methods do not check                                                                      |
+| Prologue mimicry                       | Replace the original prologue instructions in the trampoline so the first bytes still resemble a valid function prologue, making pattern matching harder         |
+| Dynamic trampoline code                | Generate unique trampoline instruction sequences per hook to avoid fixed byte pattern matching                                                                   |
 
 ---
 
@@ -88,10 +91,16 @@ The invariant is that a resolved function pointer obtained via `dlsym` for a fun
 2. **Determine library address range** — Parse `/proc/self/maps` (via SVC) to find all executable (`r-xp`) segments belonging to libc.so (match by pathname). Record the base and end addresses of these segments.
 3. **Validate address range** — Check if the resolved function address from step 1 falls within any of the executable segments identified in step 2. If it falls outside, the GOT has been tampered with — the function resolves to code in a different library.
 4. **Check for inline hook trampolines** — Read the first 12–16 bytes at the resolved function address. On ARM64, check for:
-   - `LDR X16, #8; BR X16` pattern (bytes: `50 00 00 58 00 02 1F D6`) followed by an 8-byte absolute address
-   - Direct `B` instruction (opcode `0x14xxxxxx` or `0x17xxxxxx`) branching outside the function's library range
+   - **Dobby / substrate** — `LDR X17, #8; BR X17` pattern (bytes: `51 00 00 58 20 02 1F D6`) followed by an 8-byte absolute address
+   - **ShadowHook** — `STP X16, X17, [SP, #-0x10]!; LDR X17, #8; BR X17` pattern (bytes: `F1 4F 1F A9 51 00 00 58 20 02 1F D6`) — 12 bytes before the target address
+   - **android-inline-hook** — `LDR X16, #8; BR X16` pattern (bytes: `50 00 00 58 00 02 1F D6`) followed by an 8-byte absolute address
+   - **Generic** — Direct `B` instruction (opcode `0x14xxxxxx` or `0x17xxxxxx`) branching outside the function's library range
+   - **ADRP+ADD+BR** — `ADRP Xn, #page; ADD Xn, Xn, #off; BR Xn` — a 3-instruction sequence commonly used by hook frameworks when the target is within ±4GB
      On ARM32, check for:
-   - `LDR PC, [PC, #-4]` pattern (bytes: `04 F0 1F E5`) followed by a 4-byte absolute address
+   - `LDR PC, [PC, #-4]` pattern (bytes: `04 F0 1F E5`) followed by a 4-byte absolute address (Dobby, ShadowHook)
+   - **android-inline-hook** — `LDR PC, [PC, #0]` pattern (bytes: `00 F0 9F E5`) followed by a 4-byte absolute address
+   - **Thumb mode** — `LDR.W PC, [PC, #0]` (bytes: `DF F8 00 F0`) followed by a 4-byte absolute address — hooks on Thumb2 functions
+     Note: Framework-specific patterns can overlap; the key invariant is that the first few instructions should match the compiler-generated prologue (e.g., `STP X29, X30, [SP, #-N]!` on ARM64), not a load-branch sequence.
 5. **Cross-validate with multiple methods** — If both the GOT range check and inline hook check pass, the function is likely clean. If either fails, report the hook with detailed information about which function, which library, and which check failed.
 
 ### Detection PoC _(optional)_

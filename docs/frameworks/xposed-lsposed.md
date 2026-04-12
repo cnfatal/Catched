@@ -15,8 +15,9 @@ The Xposed framework allows modules to hook any Java or Kotlin method in any And
 1. **Zygote injection** — At boot, the Xposed/LSPosed module injects `XposedBridge.jar` (or equivalent loader) into the Zygote process via Riru or Zygisk. This ensures the bridge is present before any app process is created.
 2. **App fork inheritance** — When Android forks a new app process from Zygote, the injected bridge is inherited. LSPosed selectively activates only for apps in its scope list.
 3. **Module loading** — The bridge loads Xposed modules (APKs with `xposed_init` metadata) using custom `ClassLoader` instances. Each module's entry class is instantiated and its `handleLoadPackage()` callback is invoked.
-4. **Method hooking** — Modules call `XposedHelpers.findAndHookMethod()` which modifies the target `ArtMethod` struct in memory: the `access_flags` field gains `kAccNative`, and the `entry_point_from_quick_compiled_code` is redirected to the Xposed trampoline.
-5. **Callback execution** — When the hooked method is called, the trampoline dispatches to registered `beforeHookedMethod` / `afterHookedMethod` callbacks, giving modules full control over arguments, return values, and execution flow.
+4. **Method hooking (classic)** — Modules call `XposedHelpers.findAndHookMethod()` which modifies the target `ArtMethod` struct in memory: the `access_flags` field gains `kAccNative`, and the `entry_point_from_quick_compiled_code` is redirected to the Xposed trampoline.
+5. **Method hooking (inline code patching)** — Modern LSPosed/LSPlant can optionally hook by patching the compiled native code at the method's `entry_point_` directly rather than modifying ArtMethod fields. This requires setting `kAccCompileDontBother` (0x02000000) to prevent JIT recompilation, and clearing `kAccPreCompiled` and `kAccFastInterpreterToInterpreterInvoke` to control the execution path. This approach does NOT set `kAccNative`, making it invisible to the classic detection approach.
+6. **Callback execution** — When the hooked method is called, the trampoline dispatches to registered `beforeHookedMethod` / `afterHookedMethod` callbacks, giving modules full control over arguments, return values, and execution flow.
 
 ---
 
@@ -67,13 +68,18 @@ Known anti-detection techniques supported by this framework:
 
 ## Techniques Used
 
-| Technique               | Doc                                                                    | Role in This Framework                                                     |
-| ----------------------- | ---------------------------------------------------------------------- | -------------------------------------------------------------------------- |
-| ClassLoader analysis    | [classloader-analysis.md](../techniques/classloader-analysis.md)       | Detect injected ClassLoaders carrying Xposed/LSPosed module JARs           |
-| Java reflection         | [java-reflection.md](../techniques/java-reflection.md)                 | Access XposedBridge internal fields like methodCache and callback lists    |
-| ArtMethod introspection | [artmethod-introspection.md](../techniques/artmethod-introspection.md) | Detect tampered access_flags and redirected entry points on hooked methods |
-| procfs scanning         | [procfs-scanning.md](../techniques/procfs-scanning.md)                 | Scan `/proc/self/maps` for injected libraries and anonymous executables    |
-| Memory pattern scan     | [memory-pattern-scan.md](../techniques/memory-pattern-scan.md)         | Search anonymous memory regions for hidden ELF headers and Xposed strings  |
-| Stack trace analysis    | [stack-trace-analysis.md](../techniques/stack-trace-analysis.md)       | Inspect call stacks for `de.robv.android.xposed` class frames              |
-| Filesystem path check   | [filesystem-path-check.md](../techniques/filesystem-path-check.md)     | Check for `app_process.orig` and other Xposed filesystem artifacts         |
-| Package manager scan    | [package-manager-scan.md](../techniques/package-manager-scan.md)       | Detect LSPosed manager or Xposed installer packages                        |
+| Technique               | Doc                                                                            | Role in This Framework                                                                      |
+| ----------------------- | ------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------- |
+| ClassLoader analysis    | [classloader-analysis.md](../techniques/classloader-analysis.md)               | Detect injected ClassLoaders carrying Xposed/LSPosed module JARs                            |
+| Java reflection         | [java-reflection.md](../techniques/java-reflection.md)                         | Access XposedBridge internal fields like methodCache and callback lists                     |
+| ArtMethod introspection | [artmethod-introspection.md](../techniques/artmethod-introspection.md)         | Detect tampered access_flags and redirected entry points on hooked methods                  |
+| procfs scanning         | [procfs-scanning.md](../techniques/procfs-scanning.md)                         | Scan `/proc/self/maps` for injected libraries and anonymous executables                     |
+| Memory pattern scan     | [memory-pattern-scan.md](../techniques/memory-pattern-scan.md)                 | Search anonymous memory regions for hidden ELF headers and Xposed strings                   |
+| Stack trace analysis    | [stack-trace-analysis.md](../techniques/stack-trace-analysis.md)               | Inspect call stacks for `de.robv.android.xposed` class frames                               |
+| Filesystem path check   | [filesystem-path-check.md](../techniques/filesystem-path-check.md)             | Check for `app_process.orig` and other Xposed filesystem artifacts                          |
+| Package manager scan    | [package-manager-scan.md](../techniques/package-manager-scan.md)               | Detect LSPosed manager or Xposed installer packages                                         |
+| Inline code patching    | [inline-code-patching.md](../techniques/inline-code-patching.md)               | Detect patched function prologues in method compiled code (ARM64/ARM32 trampoline patterns) |
+| Code integrity verify   | [code-integrity-verification.md](../techniques/code-integrity-verification.md) | Compare .text section disk vs memory to detect inline patches                               |
+| Signal handler inspect  | [signal-handler-inspection.md](../techniques/signal-handler-inspection.md)     | Detect SIGSYS/SIGSEGV handlers installed by Zygisk loader                                   |
+| ART internal hooks      | [art-internal-hook-detection.md](../techniques/art-internal-hook-detection.md) | Detect hooks on libart.so internal functions (ShouldUseInterpreterEntrypoint, ClassLinker)  |
+| SVC direct syscall      | [svc-direct-syscall.md](../techniques/svc-direct-syscall.md)                   | Bypass GOT/PLT hooks for procfs and filesystem reads                                        |
