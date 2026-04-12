@@ -12,6 +12,10 @@ add_library(catched SHARED
     frida_detect.c
     art_method.c
     npatch_detect.c
+    seccomp_detect.c
+    signal_detect.c
+    integrity_detect.c
+    apk_signature.c
 )
 
 # 编译选项

@@ -6,6 +6,7 @@
 int check_got_hook(const char *so_name);
 int check_inline_hook(void *func_addr);
 int check_openat_hook(void);
+int check_critical_functions_hook(void);
 
 int detect_xposed_maps(void);
 int detect_xposed_libart(void);

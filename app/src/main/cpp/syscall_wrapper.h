@@ -27,6 +27,9 @@ int sg_access(const char *path, int mode);
 int sg_fstatat(int dirfd, const char *path, struct stat *buf, int flags);
 int sg_stat(const char *path, struct stat *buf);
 
+// 文件定位
+off_t sg_lseek(int fd, off_t offset, int whence);
+
 // 内存映射
 void *sg_mmap(void *addr, size_t length, int prot, int flags, int fd, off_t offset);
 int sg_munmap(void *addr, size_t length);
@@ -37,6 +40,14 @@ int sg_getdents64(int fd, void *dirp, size_t count);
 // Socket 操作
 int sg_socket(int domain, int type, int protocol);
 int sg_connect(int sockfd, const void *addr, int addrlen);
+
+// 信号操作
+int sg_rt_sigaction(int signum, const void *act, void *oldact, size_t sigsetsize);
+
+// 链接与进程信息
+ssize_t sg_readlinkat(int dirfd, const char *path, char *buf, size_t bufsiz);
+int sg_prctl(int option, unsigned long arg2, unsigned long arg3,
+             unsigned long arg4, unsigned long arg5);
 
 // 读取完整文件到缓冲区 (使用 SVC 调用)
 // 返回读取字节数，失败返回 -1

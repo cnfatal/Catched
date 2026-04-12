@@ -12,17 +12,19 @@
  */
 
 // 单条 maps 扫描结果
-typedef struct {
-    char library[256];       // 匹配到的库名/路径
-    unsigned long start;     // 映射起始地址
-    unsigned long end;       // 映射结束地址
-    char perms[5];           // 权限 (rwxp)
+typedef struct
+{
+    char library[256];   // 匹配到的库名/路径
+    unsigned long start; // 映射起始地址
+    unsigned long end;   // 映射结束地址
+    char perms[5];       // 权限 (rwxp)
 } SgMapMatch;
 
 // 扫描结果集
-typedef struct {
-    SgMapMatch matches[32];  // 最多 32 条匹配
-    int count;               // 实际匹配数
+typedef struct
+{
+    SgMapMatch matches[32]; // 最多 32 条匹配
+    int count;              // 实际匹配数
 } SgMapScanResult;
 
 /**
@@ -50,5 +52,12 @@ int sg_detect_suspicious_executable_maps(void);
  * 扫描 /proc/self/maps 的匿名读写内存段（r--p/rw-p）内是否存在被去除了执行权限伪装的 ELF
  */
 int sg_detect_hidden_elf_maps(void);
+
+/**
+ * 验证 /proc/self/maps 中文件映射的 inode 是否与实际文件一致
+ * 检测 maps 篡改（通过 overlay/bind mount 替换库文件）
+ * @return 不一致的映射数量
+ */
+int sg_validate_maps_inode(void);
 
 #endif // CATCHED_MAPS_SCANNER_H
