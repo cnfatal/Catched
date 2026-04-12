@@ -109,4 +109,34 @@ fun npatchChecks(context: Context): List<Check> = listOf(
         }.getOrDefault(emptyList())
         CheckResult(found.isNotEmpty(), found.joinToString("\n") { "assets/$it" }.ifEmpty { null })
     },
+
+    Check("np.seccomp", G, "Seccomp-BPF 过滤器检测",
+        "读取 /proc/self/status 的 Seccomp 和 Seccomp_filters 字段，NPatch/LSPatch 会安装 seccomp-bpf 过滤器拦截 SVC 系统调用来实现 openat 等的重定向",
+        setOf("native", "svc", "procfs")
+    ) {
+        val status = NativeBridge.nDetectSeccompStatus()
+        val filterCount = NativeBridge.nDetectSeccompFilterCount()
+        val detected = status == 2 || filterCount > 0
+        val detail = buildString {
+            append("Seccomp=$status")
+            if (filterCount >= 0) append(", filters=$filterCount")
+        }
+        CheckResult(detected, detail)
+    },
+
+    Check("np.sigsys", G, "SIGSYS 信号处理器检测",
+        "通过 SVC rt_sigaction 读取 SIGSYS 的信号处理器，seccomp-bpf SECCOMP_RET_TRAP 模式会触发 SIGSYS，自定义处理器说明有 seccomp 拦截活跃",
+        setOf("native", "svc", "signal")
+    ) {
+        val detected = NativeBridge.nDetectSigsysHandler()
+        CheckResult(detected, if (detected) "SIGSYS 有自定义信号处理器 (seccomp-bpf 活跃)" else null)
+    },
+
+    Check("np.capability", G, "Capability 异常检测",
+        "读取 /proc/self/status 的 CapEff/CapPrm 字段，正常 App 进程 Capability 应为全零，非零可能表示通过 root 提权注入",
+        setOf("native", "svc", "procfs")
+    ) {
+        val detected = NativeBridge.nDetectCapabilityAnomaly()
+        CheckResult(detected, if (detected) "进程 Capability 不为零 (异常提权)" else null)
+    },
 )

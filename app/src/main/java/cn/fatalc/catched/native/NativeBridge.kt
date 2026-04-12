@@ -41,4 +41,30 @@ object NativeBridge {
     @JvmStatic external fun nDetectNPatchOpenatHook(): Boolean
     @JvmStatic external fun nDetectNPatchCacheDir(dataDir: String): Boolean
     @JvmStatic external fun nDetectNPatchProfile(dataDir: String): Boolean
+
+    // Seccomp-BPF
+    @JvmStatic external fun nDetectSeccompStatus(): Int
+    @JvmStatic external fun nDetectSeccompFilterCount(): Int
+    @JvmStatic external fun nDetectCapabilityAnomaly(): Boolean
+
+    // Signal handler
+    @JvmStatic external fun nDetectSigsysHandler(): Boolean
+    @JvmStatic external fun nDetectSigsegvHandler(): Boolean
+    @JvmStatic external fun nDetectSigbusHandler(): Boolean
+
+    // Code integrity
+    @JvmStatic external fun nDetectTextIntegrity(soPath: String): Int
+    @JvmStatic external fun nDetectElfSegmentGap(): Boolean
+    @JvmStatic external fun nDetectVdsoAnomaly(): Boolean
+    @JvmStatic external fun nDetectTrampolineIslands(): Boolean
+    @JvmStatic external fun nDetectLibartInternalHooks(): Boolean
+    @JvmStatic external fun nDetectReturnAddressAnomaly(): Boolean
+
+    // Extended hook detection
+    @JvmStatic external fun nCheckAccessFlagsAnomaly(method: Method, sdkVersion: Int): Int
+    @JvmStatic external fun nCheckCriticalFunctionsHook(): Int
+    @JvmStatic external fun nValidateMapsInode(): Int
+
+    // APK signature
+    @JvmStatic external fun nExtractApkCertSha256(apkPath: String): String?
 }

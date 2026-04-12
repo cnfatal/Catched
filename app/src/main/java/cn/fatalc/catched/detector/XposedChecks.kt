@@ -251,4 +251,54 @@ fun xposedChecks(context: Context): List<Check> = listOf(
         val anomaly = size < 16 || size > 128
         CheckResult(anomaly, "ArtMethod size: $size bytes" + if (anomaly) " (expected 32-64)" else "")
     },
+
+    Check("xp.compilation_flags", G, "ArtMethod 编译控制标志",
+        "检查 ArtMethod access_flags 中的 kAccCompileDontBother/kAccPreCompiled/kAccFastInterpreterToInterpreterInvoke 标志组合，" +
+        "Xposed/LSPosed hook 方法时必须设置 kAccCompileDontBother 阻止 JIT 重编译，同时清除 PreCompiled 和 FastInterpreter 标志",
+        setOf("native", "memory", "art")
+    ) {
+        val evidence = mutableListOf<String>()
+        val sdkVersion = android.os.Build.VERSION.SDK_INT
+
+        // 选取几个常见的被 hook 目标方法来检查
+        val targetMethods = listOf(
+            "android.app.Activity" to "onCreate",
+            "android.app.Application" to "attach",
+            "android.content.ContextWrapper" to "attachBaseContext",
+        )
+
+        targetMethods.forEach { (className, methodName) ->
+            runCatching {
+                val clazz = Class.forName(className)
+                val methods = clazz.declaredMethods.filter { it.name == methodName }
+                methods.forEach { method ->
+                    val anomaly = NativeBridge.nCheckAccessFlagsAnomaly(method, sdkVersion)
+                    if (anomaly != 0) {
+                        val flags = mutableListOf<String>()
+                        if (anomaly and 1 != 0) flags.add("kAccNative")
+                        if (anomaly and 2 != 0) flags.add("kAccCompileDontBother")
+                        if (anomaly and 4 != 0) flags.add("PreCompiled cleared")
+                        if (anomaly and 8 != 0) flags.add("FastInterpreter cleared")
+                        evidence.add("$className.$methodName: ${flags.joinToString(", ")}")
+                    }
+                }
+            }
+        }
+
+        CheckResult(evidence.isNotEmpty(), evidence.joinToString("\n").ifEmpty { null })
+    },
+
+    Check("xp.signal_handler", G, "信号处理器异常",
+        "通过 SVC rt_sigaction 检查 SIGSEGV 和 SIGBUS 的信号处理器，Xposed/LSPosed 在进行不安全内存操作时会注册自定义的崩溃恢复处理器",
+        setOf("native", "svc", "signal")
+    ) {
+        val sigsegv = NativeBridge.nDetectSigsegvHandler()
+        val sigbus = NativeBridge.nDetectSigbusHandler()
+        val detected = sigsegv || sigbus
+        val detail = buildString {
+            if (sigsegv) append("SIGSEGV: 自定义处理器\n")
+            if (sigbus) append("SIGBUS: 自定义处理器")
+        }.trim()
+        CheckResult(detected, detail.ifEmpty { null })
+    },
 )

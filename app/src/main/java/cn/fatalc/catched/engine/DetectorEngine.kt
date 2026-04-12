@@ -14,6 +14,7 @@ class DetectorEngine(context: Context) {
         addAll(xposedChecks(context))
         addAll(fridaChecks())
         addAll(npatchChecks(context))
+        addAll(nativeHookChecks())
         addAll(deviceIntegrityChecks(context))
         addAll(emulatorChecks(context))
         addAll(debugChecks(context))
