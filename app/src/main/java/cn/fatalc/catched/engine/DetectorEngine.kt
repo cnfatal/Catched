@@ -1,6 +1,7 @@
 package cn.fatalc.catched.engine
 
 import android.content.Context
+import android.util.Log
 import cn.fatalc.catched.detector.*
 import cn.fatalc.catched.model.Check
 import cn.fatalc.catched.model.CheckResult
@@ -39,6 +40,9 @@ class DetectorEngine(context: Context) {
         targets.forEachIndexed { index, check ->
             val result = check.run()
             results[check.id] = result
+            Log.d("Catched", "[${check.id}] detected=${result.detected}" +
+                    (if (result.actual != null) " actual=${result.actual}" else "") +
+                    (if (result.evidence != null) " evidence=${result.evidence}" else ""))
             callback?.onCheckComplete(check, result)
             callback?.onProgress((index + 1).toFloat() / targets.size)
         }

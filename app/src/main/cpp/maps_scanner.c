@@ -299,9 +299,17 @@ int sg_detect_hidden_elf_maps(void)
                 if (end - start >= 4096)
                 {
                     // 读取内存区域首部 4 字节，校验是否是 ELF 魔数 (\x7fELF)
-                    // 由于 perms[0] == 'r' 该地址对我们来说直接可读
-                    uint32_t *magic_ptr = (uint32_t *)start;
-                    uint32_t magic = *magic_ptr;
+                    // 用 sg_read 通过 /proc/self/mem 安全读取，避免直接解引用导致 SIGSEGV
+                    uint32_t magic = 0;
+                    int mem_fd = sg_open("/proc/self/mem", O_RDONLY);
+                    if (mem_fd >= 0)
+                    {
+                        if (sg_lseek(mem_fd, (off_t)start, 0 /* SEEK_SET */) == (off_t)start)
+                        {
+                            sg_read(mem_fd, &magic, sizeof(magic));
+                        }
+                        sg_close(mem_fd);
+                    }
 
                     if (magic == 0x464C457F)
                     { // 内存中发现被隐藏的 ELF 映像

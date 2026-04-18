@@ -51,6 +51,10 @@ static void *get_art_method_ptr(JNIEnv *env, jobject method)
     // 在 ART 中，通过 FromReflectedMethod 获取 ArtMethod*
     jmethodID art_method = (*env)->FromReflectedMethod(env, method);
     (*env)->DeleteLocalRef(env, method_class);
+    if (!art_method) {
+        LOGD("get_art_method_ptr: FromReflectedMethod returned NULL");
+        return NULL;
+    }
     return (void *)art_method;
 }
 
@@ -84,7 +88,7 @@ int get_art_method_size(JNIEnv *env)
 int check_art_method_hooked(JNIEnv *env, jobject method)
 {
     void *art_method = get_art_method_ptr(env, method);
-    if (!art_method)
+    if (!art_method || (uintptr_t)art_method < 0x1000)
         return 0;
 
     // 读取 access_flags (偏移量通常为 4 字节)
@@ -137,7 +141,7 @@ int compare_art_method_size(JNIEnv *env, jobject method1, jobject method2)
 int check_access_flags_anomaly(JNIEnv *env, jobject method, int sdk_version)
 {
     void *art_method = get_art_method_ptr(env, method);
-    if (!art_method)
+    if (!art_method || (uintptr_t)art_method < 0x1000)
         return 0;
 
     uint32_t *access_flags_ptr = (uint32_t *)((uint8_t *)art_method + 4);
