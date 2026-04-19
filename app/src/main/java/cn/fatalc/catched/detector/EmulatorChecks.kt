@@ -101,13 +101,13 @@ fun emulatorChecks(context: Context): List<Check> = listOf(
     },
 
     Check("em.telephony", G, "电话信息异常",
-        "检查 TelephonyManager 返回的设备信息，模拟器通常网络运营商为 Android/空，设备 ID 为全零或 000000000000000",
+        "检查 TelephonyManager 返回的设备信息，重点关注运营商为 Android 等明显模拟器特征；空运营商通常只是无 SIM，不单独判定",
         setOf("java", "telephony")
     ) {
         val tm = context.getSystemService(Context.TELEPHONY_SERVICE) as TelephonyManager
         val anomalies = mutableListOf<String>()
         val operator = tm.networkOperatorName ?: ""
-        if (operator.equals("android", true) || operator.isEmpty()) {
+        if (operator.equals("android", true)) {
             anomalies.add("operator=$operator")
         }
         val simOp = tm.simOperatorName ?: ""
@@ -115,7 +115,7 @@ fun emulatorChecks(context: Context): List<Check> = listOf(
             anomalies.add("simOperator=$simOp")
         }
         val phoneType = tm.phoneType
-        if (phoneType == TelephonyManager.PHONE_TYPE_NONE) {
+        if (phoneType == TelephonyManager.PHONE_TYPE_NONE && anomalies.isNotEmpty()) {
             anomalies.add("phoneType=NONE")
         }
         CheckResult(anomalies.isNotEmpty(), anomalies.joinToString("\n").ifEmpty { null })

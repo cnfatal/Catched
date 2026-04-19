@@ -111,15 +111,18 @@ fun npatchChecks(context: Context): List<Check> = listOf(
     },
 
     Check("np.seccomp", G, "Seccomp-BPF 过滤器检测",
-        "读取 /proc/self/status 的 Seccomp 和 Seccomp_filters 字段，NPatch/LSPatch 会安装 seccomp-bpf 过滤器拦截 SVC 系统调用来实现 openat 等的重定向",
+        "读取 /proc/self/status 的 Seccomp 与 Seccomp_filters，并结合 SIGSYS 处理器判断。Android 普通进程 Seccomp=2 属于常态，不应单独判定为注入",
         setOf("native", "svc", "procfs")
     ) {
         val status = NativeBridge.nDetectSeccompStatus()
         val filterCount = NativeBridge.nDetectSeccompFilterCount()
-        val detected = status == 2 || filterCount > 0
+        val hasSigsysHandler = NativeBridge.nDetectSigsysHandler()
+        val hasExtraFilter = filterCount > 1
+        val detected = hasSigsysHandler && (hasExtraFilter || status == 2)
         val detail = buildString {
             append("Seccomp=$status")
             if (filterCount >= 0) append(", filters=$filterCount")
+            append(", sigsysHandler=$hasSigsysHandler")
         }
         CheckResult(detected, detail)
     },

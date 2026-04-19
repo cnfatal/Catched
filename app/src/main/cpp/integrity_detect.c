@@ -27,14 +27,15 @@ typedef struct
 
 static int parse_maps_entries(MapEntry *entries, int max_entries)
 {
-    char *buf = (char *)sg_mmap(NULL, 131072, 3, 0x22, -1, 0);
+    const size_t maps_buf_size = 1024 * 1024;
+    char *buf = (char *)sg_mmap(NULL, maps_buf_size, 3, 0x22, -1, 0);
     if (buf == (char *)-1)
         return 0;
 
-    ssize_t len = sg_read_file("/proc/self/maps", buf, 131072);
+    ssize_t len = sg_read_file("/proc/self/maps", buf, maps_buf_size);
     if (len <= 0)
     {
-        sg_munmap(buf, 131072);
+        sg_munmap(buf, maps_buf_size);
         return 0;
     }
 
@@ -108,14 +109,15 @@ static int parse_maps_entries(MapEntry *entries, int max_entries)
             p++;
         }
 
-        // 跳过 dev inode 到路径
-        int spaces = 0;
-        while (*p && spaces < 2)
-        {
-            if (*p == ' ')
-                spaces++;
+        // 跳过 dev 和 inode 字段到路径
+        while (*p == ' ')
             p++;
-        }
+        while (*p && *p != ' ')
+            p++; // dev
+        while (*p == ' ')
+            p++;
+        while (*p && *p != ' ')
+            p++; // inode
         while (*p == ' ')
             p++;
 
@@ -132,7 +134,7 @@ static int parse_maps_entries(MapEntry *entries, int max_entries)
         line = next;
     }
 
-    sg_munmap(buf, 131072);
+    sg_munmap(buf, maps_buf_size);
     return count;
 }
 
@@ -347,39 +349,35 @@ int detect_vdso_anomaly(void)
     if (vdso_auxval == 0)
         return 0; // 平台不提供 vDSO
 
-    // 2. 从 maps 中找 [vdso] 条目
+    // 2. 从 maps 中找 [vdso] 条目，检查 auxval 地址是否落在任一 [vdso] 映射范围内
     MapEntry entries[512];
     int count = parse_maps_entries(entries, 512);
 
-    unsigned long vdso_maps_start = 0;
+    int vdso_count = 0;
+    int aux_in_vdso_range = 0;
     for (int i = 0; i < count; i++)
     {
         if (strcmp(entries[i].path, "[vdso]") == 0)
         {
-            vdso_maps_start = entries[i].start;
-            break;
+            vdso_count++;
+            if (vdso_auxval >= entries[i].start && vdso_auxval < entries[i].end)
+            {
+                aux_in_vdso_range = 1;
+            }
         }
     }
 
     // 3. 交叉验证
-    if (vdso_maps_start == 0)
+    if (vdso_count == 0)
     {
         LOGD("vDSO: [vdso] not found in maps but auxval=0x%lx", vdso_auxval);
-        return 1; // maps 被篡改，过滤掉了 vdso
+        return 0; // 部分设备/内核下可能不可见，避免误报
     }
 
-    if (vdso_auxval != vdso_maps_start)
+    if (!aux_in_vdso_range)
     {
-        LOGD("vDSO: address mismatch auxval=0x%lx maps=0x%lx", vdso_auxval, vdso_maps_start);
-        return 1; // 地址不一致
-    }
-
-    // 4. 验证 vDSO 内容是 ELF
-    uint32_t magic = *(uint32_t *)vdso_auxval;
-    if (magic != 0x464C457F)
-    { // \x7fELF
-        LOGD("vDSO: invalid ELF magic at 0x%lx", vdso_auxval);
-        return 1;
+        LOGD("vDSO: auxval=0x%lx is not inside any [vdso] mapping", vdso_auxval);
+        return 1; // 地址不在任何 vdso 范围内
     }
 
     return 0;
@@ -558,12 +556,10 @@ int detect_libart_internal_hooks(void)
 int detect_return_address_anomaly(void)
 {
 #if defined(__aarch64__)
-    // 获取当前 LR (X30) 的值
-    void *lr;
-    __asm__ volatile("mov %0, x30" : "=r"(lr));
+    // 使用编译器内建返回地址，避免寄存器分配/优化导致的误差
+    void *lr = __builtin_extract_return_addr(__builtin_return_address(0));
 #elif defined(__arm__)
-    void *lr;
-    __asm__ volatile("mov %0, lr" : "=r"(lr));
+    void *lr = __builtin_extract_return_addr(__builtin_return_address(0));
 #else
     return 0;
 #endif
@@ -590,6 +586,13 @@ int detect_return_address_anomaly(void)
             {
                 return 0;
             }
+            if (strstr(entries[i].path, "jit-cache") != NULL ||
+                strstr(entries[i].path, "jit-zygote-cache") != NULL ||
+                strstr(entries[i].path, "dalvik-jit-code-cache") != NULL)
+            {
+                // JIT 代码缓存是合法的匿名可执行区域
+                return 0;
+            }
             // 在匿名可执行段中 — 可能是 trampoline
             LOGD("Return address 0x%lx in anonymous executable region 0x%lx-0x%lx",
                  lr_addr, entries[i].start, entries[i].end);
@@ -597,7 +600,7 @@ int detect_return_address_anomaly(void)
         }
     }
 
-    // LR 不在任何可执行段中 — 异常
-    LOGD("Return address 0x%lx not in any executable region", lr_addr);
-    return 1;
+    // 部分设备/编译器场景下返回地址可能无法稳定映射，降级为未知避免误报
+    LOGD("Return address 0x%lx not in any executable region (treat as unknown)", lr_addr);
+    return 0;
 }

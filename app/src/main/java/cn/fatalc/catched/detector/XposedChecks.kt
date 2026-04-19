@@ -244,12 +244,12 @@ fun xposedChecks(context: Context): List<Check> = listOf(
     },
 
     Check("xp.artmethod", G, "ArtMethod 分析",
-        "通过 JNI 获取 ArtMethod 结构体的内存大小，正常 ARM64 上为 32-64 字节。异常大小可能表明 ART 被修补或 ArtMethod 结构被 Xposed/LSPosed 扩展",
+        "通过 JNI 获取 ArtMethod 结构体的内存大小。该值在不同 Android 版本/厂商 ROM 上差异较大，仅将明显非法值作为异常信号",
         setOf("native", "memory")
     ) {
         val size = NativeBridge.nGetArtMethodSize()
-        val anomaly = size < 16 || size > 128
-        CheckResult(anomaly, "ArtMethod size: $size bytes" + if (anomaly) " (expected 32-64)" else "")
+        val anomaly = size <= 0 || size > 2048
+        CheckResult(anomaly, "ArtMethod size: $size bytes" + if (anomaly) " (out of safe range: 1-2048)" else "")
     },
 
     Check("xp.compilation_flags", G, "ArtMethod 编译控制标志",
