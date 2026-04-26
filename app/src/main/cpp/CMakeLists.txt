@@ -16,6 +16,7 @@ add_library(catched SHARED
     signal_detect.c
     integrity_detect.c
     apk_signature.c
+    ssl_detect.c
 )
 
 # 编译选项

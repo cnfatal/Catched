@@ -67,4 +67,10 @@ object NativeBridge {
 
     // APK signature
     @JvmStatic external fun nExtractApkCertSha256(apkPath: String): String?
+
+    // SSL pinning
+    @JvmStatic external fun nDetectSslFuncHook(): Boolean
+    @JvmStatic external fun nDetectLibsslPathAnomaly(): Boolean
+    @JvmStatic external fun nDetectMultipleLibssl(): Boolean
+    @JvmStatic external fun nDetectSslBypassLibs(): Boolean
 }

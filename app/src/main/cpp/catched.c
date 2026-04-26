@@ -12,6 +12,7 @@
 #include "signal_detect.h"
 #include "integrity_detect.h"
 #include "apk_signature.h"
+#include "ssl_detect.h"
 
 #define TAG "Catched"
 #define LOGD(...) __android_log_print(ANDROID_LOG_DEBUG, TAG, __VA_ARGS__)
@@ -332,6 +333,35 @@ static jint native_validateMapsInode(JNIEnv *env, jclass clazz)
     return sg_validate_maps_inode();
 }
 
+// --- SSL Pinning ---
+static jboolean native_detectSslFuncHook(JNIEnv *env, jclass clazz)
+{
+    (void)env;
+    (void)clazz;
+    return detect_ssl_func_hook() ? JNI_TRUE : JNI_FALSE;
+}
+
+static jboolean native_detectLibsslPathAnomaly(JNIEnv *env, jclass clazz)
+{
+    (void)env;
+    (void)clazz;
+    return detect_libssl_path_anomaly() ? JNI_TRUE : JNI_FALSE;
+}
+
+static jboolean native_detectMultipleLibssl(JNIEnv *env, jclass clazz)
+{
+    (void)env;
+    (void)clazz;
+    return detect_multiple_libssl() ? JNI_TRUE : JNI_FALSE;
+}
+
+static jboolean native_detectSslBypassLibs(JNIEnv *env, jclass clazz)
+{
+    (void)env;
+    (void)clazz;
+    return detect_ssl_bypass_libs() ? JNI_TRUE : JNI_FALSE;
+}
+
 // --- APK 签名直接解析 ---
 static jstring native_extractApkCertSha256(JNIEnv *env, jclass clazz, jstring apkPath)
 {
@@ -424,6 +454,12 @@ static JNINativeMethod methods[] = {
 
     // APK signature
     {"nExtractApkCertSha256", "(Ljava/lang/String;)Ljava/lang/String;", (void *)native_extractApkCertSha256},
+
+    // SSL pinning
+    {"nDetectSslFuncHook", "()Z", (void *)native_detectSslFuncHook},
+    {"nDetectLibsslPathAnomaly", "()Z", (void *)native_detectLibsslPathAnomaly},
+    {"nDetectMultipleLibssl", "()Z", (void *)native_detectMultipleLibssl},
+    {"nDetectSslBypassLibs", "()Z", (void *)native_detectSslBypassLibs},
 };
 
 JNIEXPORT jint JNI_OnLoad(JavaVM *vm, void *reserved)

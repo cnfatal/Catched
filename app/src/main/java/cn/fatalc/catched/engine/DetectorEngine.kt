@@ -19,6 +19,7 @@ class DetectorEngine(context: Context) {
         addAll(deviceIntegrityChecks(context))
         addAll(emulatorChecks(context))
         addAll(debugChecks(context))
+        addAll(sslPinningChecks(context))
     }
 
     val groups: List<String> get() = checks.map { it.group }.distinct()

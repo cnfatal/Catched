@@ -6,6 +6,10 @@
         tools:ignore="QueryAllPackagesPermission"
         xmlns:tools="http://schemas.android.com/tools" />
 
+    <!-- SSL Pinning self-test (sp.pin_selftest): tries to make an HTTPS handshake
+         with a reject-all TrustManager and expects an SSLHandshakeException.
+         Without INTERNET the call short-circuits with SecurityException. -->
+    <uses-permission android:name="android.permission.INTERNET" />
     <application
         android:allowBackup="false"
         android:icon="@mipmap/ic_launcher"
